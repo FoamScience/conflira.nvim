@@ -1,4 +1,7 @@
-# atlassian.nvim
+# conflira.nvim
+
+> Disclaimer; This plugin is an unofficial effort to remove some of the pain of working with a web app
+> on Jira issues. This is not affiliated to Atlassian in any way.
 
 A Neovim plugin for Jira and Confluence integration with rich CSF (Confluence Storage Format) editing, offline support, and agile board views.
 
@@ -25,7 +28,7 @@ A Neovim plugin for Jira and Confluence integration with rich CSF (Confluence St
 -- lazy.nvim
 -- entry points are split into jira-interface and confluence-interface
 {
-    "FoamScience/atlassian.nvim",
+    "FoamScience/conflira.nvim",
     dependencies = { "folke/snacks.nvim" },
     config = function()
         require("jira-interface").setup({
@@ -101,7 +104,7 @@ require("atlassian.icons").setup({
 ```lua
 -- lazy.nvim
 {
-    "FoamScience/atlassian.nvim",
+    "FoamScience/conflira.nvim",
     dependencies = {
         "folke/snacks.nvim",
         "nvim-treesitter/nvim-treesitter",
