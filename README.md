@@ -16,7 +16,7 @@ A Neovim plugin for Jira and Confluence integration with rich CSF (Confluence St
 ### Optional
 - [blink.cmp](https://github.com/saghen/blink.cmp) - Completion providers for Jira issue keys, Confluence page links, and CSF slash commands
 - [todo-comments.nvim](https://github.com/folke/todo-comments.nvim) - Required by `:JiraTodoToIssue` to scan buffers/projects for TODO comments and convert them to Jira issues
-- `latex2text` ([pylatexenc](https://pypi.org/project/pylatexenc/)) - LaTeX-to-unicode rendering for math blocks and inline equations in CSF buffers. Install with `pip install pylatexenc`
+- `latex2text` ([pylatexenc](https://pypi.org/project/pylatexenc/)) - LaTeX-to-unicode rendering for math blocks and inline equations in CSF buffers. Install with `uv tool install pylatexenc`
 - Image-capable terminal - Required for inline image display in CSF buffers. Supported terminals: [Kitty](https://sw.kovidgoyal.net/kitty/), [WezTerm](https://wezfurlong.org/wezterm/), [iTerm2](https://iterm2.com/), [Ghostty](https://ghostty.org/)
 
 ## Setup
@@ -194,6 +194,57 @@ require("atlassian.icons").setup({
         })
     end,
 }
+```
+
+</details>
+
+### Recommended Keybindings
+
+<details>
+<summary>which-key.nvim keybindings for Jira and Confluence</summary>
+
+```lua
+-- Jira keybindings (<leader>j)
+{ "<leader>j",  group = "Jira" },
+{ "<leader>jj", "<cmd>JiraSearch<cr>",       desc = "Search issues" },
+{ "<leader>jm", "<cmd>JiraMe<cr>",           desc = "Assigned to me" },
+{ "<leader>jc", "<cmd>JiraCreatedByMe<cr>",  desc = "Created by me" },
+{ "<leader>jp", "<cmd>JiraProject<cr>",      desc = "By project" },
+{ "<leader>jd", "<cmd>JiraDue<cr>",          desc = "By due date" },
+{ "<leader>je", "<cmd>JiraEpics<cr>",        desc = "Epics" },
+{ "<leader>jf", "<cmd>JiraFeatures<cr>",     desc = "Features/Bugs" },
+{ "<leader>jt", "<cmd>JiraTasks<cr>",        desc = "Tasks" },
+{ "<leader>jn", "<cmd>JiraCreate<cr>",       desc = "New issue" },
+{ "<leader>jr", "<cmd>JiraRefresh<cr>",      desc = "Refresh cache" },
+{ "<leader>js", "<cmd>JiraStatus<cr>",       desc = "Status" },
+{ "<leader>jw", "<cmd>JiraTeam<cr>",         desc = "Team workload" },
+{ "<leader>jb", "<cmd>JiraBoard<cr>",        desc = "Board view" },
+{ "<leader>jS", "<cmd>JiraSprint<cr>",       desc = "Sprint view" },
+{ "<leader>jT", "<cmd>JiraTodoToIssue<cr>",  desc = "TODO to Sub-Task" },
+{ "<leader>jJ", "<cmd>JiraSearchEdit<cr>",   desc = "Search & edit" },
+
+-- Confluence keybindings (<leader>c)
+{ "<leader>c",  group = "Confluence" },
+{ "<leader>cc", "<cmd>ConfluenceSearch<cr>",     desc = "Search pages" },
+{ "<leader>cs", "<cmd>ConfluenceSpaces<cr>",     desc = "List spaces" },
+{ "<leader>cp", "<cmd>ConfluencePages<cr>",      desc = "Pages in space" },
+{ "<leader>cr", "<cmd>ConfluenceRecent<cr>",     desc = "Recent pages" },
+{ "<leader>cn", "<cmd>ConfluenceCreate<cr>",     desc = "New page" },
+{ "<leader>cq", "<cmd>ConfluenceSearchCQL<cr>",  desc = "CQL search" },
+{ "<leader>cf", "<cmd>ConfluenceCQLFilter<cr>",  desc = "CQL filters" },
+{ "<leader>cR", "<cmd>ConfluenceRefresh<cr>",    desc = "Refresh cache" },
+{ "<leader>cS", "<cmd>ConfluenceStatus<cr>",     desc = "Status" },
+{ "<leader>cC", "<cmd>ConfluenceSearchEdit<cr>", desc = "Search & edit" },
+```
+
+To avoid circular dependency when checking plugin availability, use runtimepath checks instead of `pcall(require, ...)`:
+
+```lua
+local jira_ok = vim.env.JIRA_API_TOKEN
+    and #vim.api.nvim_get_runtime_file("lua/jira-interface/init.lua", false) > 0
+if jira_ok then
+    -- register Jira keybindings
+end
 ```
 
 </details>
