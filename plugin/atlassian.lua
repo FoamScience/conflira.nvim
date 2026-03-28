@@ -37,8 +37,8 @@ vim.defer_fn(function()
     end
 end, 100)
 
--- Merge highlights + conceal queries into a single "highlights" query group
--- so vim.treesitter.start() picks everything up together
+-- Set up conceal queries: merge static conceal.scm + dynamic icon-based queries
+-- into the "conceal" query group. Highlights stay separate in "highlights" group.
 do
     local done = false
     vim.api.nvim_create_autocmd('FileType', {
@@ -48,33 +48,27 @@ do
             if done then return end
             done = true
             pcall(function()
-                local sources = {}
+                -- Build conceal query from static files + dynamic icon queries
+                local conceal_sources = {}
                 local seen = {}
-                for _, group in ipairs({ 'highlights', 'conceal' }) do
-                    for _, f in ipairs(vim.api.nvim_get_runtime_file('queries/csf/' .. group .. '.scm', true)) do
-                        local content = table.concat(vim.fn.readfile(f), '\n')
-                        content = content:gsub('^;; extends%s*\n?', '')
-                        -- Deduplicate: skip if identical content already loaded
-                        if content ~= '' and not seen[content] then
-                            seen[content] = true
-                            table.insert(sources, content)
-                        end
+                for _, f in ipairs(vim.api.nvim_get_runtime_file('queries/csf/conceal.scm', true)) do
+                    local content = table.concat(vim.fn.readfile(f), '\n')
+                    content = content:gsub('^;; extends%s*\n?', '')
+                    if content ~= '' and not seen[content] then
+                        seen[content] = true
+                        table.insert(conceal_sources, content)
                     end
                 end
-                -- Append dynamically generated conceal queries from icons
+                -- Append dynamically generated conceal queries with nerd font icons
                 local dyn_ok, csf_queries = pcall(require, 'atlassian.csf.queries')
                 if dyn_ok then
                     local dynamic = csf_queries.conceal()
-                    if dynamic and dynamic ~= '' and not seen[dynamic] then
-                        seen[dynamic] = true
-                        table.insert(sources, dynamic)
+                    if dynamic and dynamic ~= '' then
+                        table.insert(conceal_sources, dynamic)
                     end
                 end
-                if #sources > 0 then
-                    vim.treesitter.query.set('csf', 'highlights', table.concat(sources, '\n'))
-                    -- Clear standalone conceal query to prevent double application
-                    -- by nvim-treesitter or Neovim's built-in treesitter modules
-                    vim.treesitter.query.set('csf', 'conceal', '')
+                if #conceal_sources > 0 then
+                    vim.treesitter.query.set('csf', 'conceal', table.concat(conceal_sources, '\n'))
                 end
             end)
         end,
