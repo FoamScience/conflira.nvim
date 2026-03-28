@@ -9,17 +9,33 @@ vim.filetype.add({
     extension = { csf = "csf" },
 })
 
-vim.api.nvim_create_autocmd('User', {
-    pattern = 'TSUpdate',
-    callback = function()
-        require('nvim-treesitter.parsers').csf = {
+-- Register CSF parser with nvim-treesitter immediately and on TSUpdate
+local function register_csf_parser()
+    local ok, parsers = pcall(require, 'nvim-treesitter.parsers')
+    if ok then
+        parsers.csf = {
             install_info = {
                 url = 'https://github.com/FoamScience/tree-sitter-csf',
                 queries = 'queries/',
             },
         }
     end
+end
+
+register_csf_parser()
+
+vim.api.nvim_create_autocmd('User', {
+    pattern = 'TSUpdate',
+    callback = register_csf_parser,
 })
+
+-- Auto-install CSF parser if not already installed
+vim.defer_fn(function()
+    if not pcall(vim.treesitter.language.inspect, 'csf') then
+        register_csf_parser()
+        vim.cmd('TSInstall csf')
+    end
+end, 100)
 
 -- Merge highlights + conceal queries into a single "highlights" query group
 -- so vim.treesitter.start() picks everything up together
