@@ -1,10 +1,9 @@
 -- Generate treesitter conceal queries for CSF buffers
--- Icons sourced from user.lspicons for single-source-of-truth
 local M = {}
 
 ---@return string Treesitter query string for CSF concealing
 function M.conceal()
-    local icons = require("user.lspicons")
+    local icons = require("atlassian.icons")
     local function ic(s) return vim.trim(s) end
 
     -- Heading icons (from lspicons)
