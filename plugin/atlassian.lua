@@ -61,6 +61,15 @@ do
                         end
                     end
                 end
+                -- Append dynamically generated conceal queries from icons
+                local dyn_ok, csf_queries = pcall(require, 'atlassian.csf.queries')
+                if dyn_ok then
+                    local dynamic = csf_queries.conceal()
+                    if dynamic and dynamic ~= '' and not seen[dynamic] then
+                        seen[dynamic] = true
+                        table.insert(sources, dynamic)
+                    end
+                end
                 if #sources > 0 then
                     vim.treesitter.query.set('csf', 'highlights', table.concat(sources, '\n'))
                     -- Clear standalone conceal query to prevent double application
@@ -76,9 +85,7 @@ vim.api.nvim_create_autocmd('FileType', {
     pattern = 'csf',
     callback = function(args)
         local buf = args.buf
-        if not require('nvim-treesitter.parsers').csf then
-            vim.treesitter.start(buf, 'csf')
-        end
+        vim.treesitter.start(buf, 'csf')
         -- Buffer options
         vim.bo[buf].textwidth = 0
         -- Window options — defer to ensure window exists
