@@ -225,16 +225,20 @@ require("atlassian.icons").setup({
 > I'm still figuring this section out, so expect frequent changes here.
 > Mainly, conceals get in the way of efficient vim-style editing, but it is
 > not interesting to look at XML content - so a good comprise must be found
+>
+> Current behavior: conceals are turned off for the line where the cursor is.
 
-Both Jira and Confluence content is edited in CSF buffers with:
+Both Jira and Confluence content is edited in CSF (XML-like) buffers with:
 
 - **Treesitter highlighting** via [tree-sitter-csf](https://github.com/FoamScience/tree-sitter-csf) (auto-installed)
 - **Smart concealing** of XML tags with nerd font icons
-- **Image hover** on `K` keypress or CursorHold
+- **Image hover** on `K` keypress or `CursorHold` event
 - **LaTeX math rendering** (block and inline equations converted to unicode)
 - **Slash commands** for inserting formatted content (type `/` at line start)
 
 #### Slash Commands
+> Some of these are tested more often than others, open issues if you encounter
+> any strange behavior
 
 | Command | Category | Description |
 |---|---|---|

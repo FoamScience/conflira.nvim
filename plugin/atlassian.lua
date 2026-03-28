@@ -1,4 +1,7 @@
 -- CSF (Confluence Storage Format) filetype detection and setup
+
+-- Default @conceal highlight: link to Special instead of Comment (grey)
+vim.api.nvim_set_hl(0, '@conceal.csf', { link = 'Special' })
 vim.filetype.add({
     pattern = {
         ["csf://.*"] = "csf",
@@ -25,9 +28,9 @@ vim.api.nvim_create_autocmd('User', {
     end,
 })
 
--- Merge highlights + conceal queries into a single "highlights" query group
--- so vim.treesitter.start() picks everything up together.
--- This is the approach from the original nvim config that is known to work.
+-- Merge highlights + conceal into a single "highlights" query group.
+-- Uses the plugin's own conceal.scm (with nerd font icons) instead of
+-- the one from TSInstall.
 do
     local done = false
     vim.api.nvim_create_autocmd('FileType', {
@@ -51,13 +54,13 @@ do
             -- Auto-install CSF parser if not already installed
             if not pcall(vim.treesitter.language.inspect, 'csf') then
                 vim.cmd('TSInstall csf')
-                return -- will work on next buffer open after install
+                return
             end
 
             pcall(function()
                 local sources = {}
                 local seen = {}
-                -- Load static highlights.scm (syntax highlighting)
+                -- Load highlights.scm from all runtimepaths
                 for _, f in ipairs(vim.api.nvim_get_runtime_file('queries/csf/highlights.scm', true)) do
                     local content = table.concat(vim.fn.readfile(f), '\n')
                     content = content:gsub('^;; extends%s*\n?', '')
@@ -66,7 +69,8 @@ do
                         table.insert(sources, content)
                     end
                 end
-                -- Dynamic conceal queries with nerd font icons (replaces static conceal.scm)
+                -- Generate conceal queries dynamically from atlassian.icons
+                -- (allows user customization via icons.setup())
                 local dyn_ok, csf_queries = pcall(require, 'atlassian.csf.queries')
                 if dyn_ok then
                     local dynamic = csf_queries.conceal()
