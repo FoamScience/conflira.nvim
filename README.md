@@ -10,20 +10,20 @@ A Neovim plugin for Jira and Confluence integration with rich CSF (Confluence St
 - [nvim-treesitter](https://github.com/nvim-treesitter/nvim-treesitter) — **required** for syntax highlighting, concealing, and CSF editing. The [tree-sitter-csf](https://github.com/FoamScience/tree-sitter-csf) grammar is auto-installed on first use via `:TSInstall csf`
 - [snacks.nvim](https://github.com/folke/snacks.nvim) — picker UI, notifications, and image display
 - `curl` — HTTP requests to Jira/Confluence REST APIs
+- A nerd font that has some ligatures support. You can get some with [getnf](https://github.com/getnf/getnf)
+- An Atlassian API token
 
 ### Optional
-
-| Dependency | Purpose |
-|---|---|
-| [blink.cmp](https://github.com/saghen/blink.cmp) | Completion providers for Jira issue keys, Confluence page links, and CSF slash commands |
-| [todo-comments.nvim](https://github.com/folke/todo-comments.nvim) | Required by `:JiraTodoToIssue` to scan buffers/projects for TODO comments and convert them to Jira issues |
-| `latex2text` ([pylatexenc](https://pypi.org/project/pylatexenc/)) | LaTeX-to-unicode rendering for math blocks and inline equations in CSF buffers. Install with `pip install pylatexenc` |
-| Image-capable terminal | Required for inline image display in CSF buffers (`K` keymap). Supported terminals: [Kitty](https://sw.kovidgoyal.net/kitty/), [WezTerm](https://wezfurlong.org/wezterm/), [iTerm2](https://iterm2.com/), [Ghostty](https://ghostty.org/) |
+- [blink.cmp](https://github.com/saghen/blink.cmp) - Completion providers for Jira issue keys, Confluence page links, and CSF slash commands
+- [todo-comments.nvim](https://github.com/folke/todo-comments.nvim) - Required by `:JiraTodoToIssue` to scan buffers/projects for TODO comments and convert them to Jira issues
+- `latex2text` ([pylatexenc](https://pypi.org/project/pylatexenc/)) - LaTeX-to-unicode rendering for math blocks and inline equations in CSF buffers. Install with `pip install pylatexenc`
+- Image-capable terminal - Required for inline image display in CSF buffers. Supported terminals: [Kitty](https://sw.kovidgoyal.net/kitty/), [WezTerm](https://wezfurlong.org/wezterm/), [iTerm2](https://iterm2.com/), [Ghostty](https://ghostty.org/)
 
 ## Setup
 
 ```lua
 -- lazy.nvim
+-- entry points are split into jira-interface and confluence-interface
 {
     "FoamScience/atlassian.nvim",
     dependencies = { "folke/snacks.nvim" },
@@ -84,7 +84,7 @@ sources = {
 
 ### Icon Overrides
 
-Override default icons to match your theme:
+Override default icons to match your theme, or proxy to some other icons package:
 
 ```lua
 require("atlassian.icons").setup({
@@ -131,7 +131,7 @@ require("atlassian.icons").setup({
                 "Blocked",
                 "Done",
             },
-            custom_fields = {},       -- Map of section heading -> Jira field ID
+            custom_fields = {},       -- Map of section heading -> Jira field ID @deprecated
             data_dir = vim.fn.stdpath("data") .. "/jira-interface",
             display = {
                 mode = "float",       -- "float", "vsplit", "split", "tab"
@@ -155,7 +155,7 @@ require("atlassian.icons").setup({
                 inline_macro = "mathinline",
                 inline_param = "body",
             },
-            templates = {},
+            templates = {}, -- @deprecated
         })
 
         -- Confluence setup (all options shown with defaults)
@@ -202,124 +202,29 @@ require("atlassian.icons").setup({
 
 ### Jira
 
-#### Search and Navigation
-
-| Command | Description |
-|---|---|
-| `:JiraSearch` | Search all issues |
-| `:JiraMe` | Issues assigned to me |
-| `:JiraCreatedByMe` | Issues I created |
-| `:JiraAssignedNotCreated` | Assigned to me but created by others |
-| `:JiraProject [name]` | Filter by project |
-| `:JiraEpics` | Browse Epics |
-| `:JiraFeatures` | Browse Features / Bugs / Issues |
-| `:JiraTasks` | Browse Tasks |
-| `:JiraDue [overdue\|today\|week\|soon]` | Filter by due date |
-
-#### Issue Management
-
-| Command | Description |
-|---|---|
-| `:JiraView [key]` | View issue details |
-| `:JiraEdit [key]` | Edit issue in CSF buffer |
-| `:JiraSearchEdit` | Search and edit |
-| `:JiraCreate [type]` | Create new issue |
-| `:JiraQuick <summary>` | Quick-create Sub-Task under branch issue |
-
-#### Status Transitions
-
-| Command | Description |
-|---|---|
-| `:JiraTransition [key]` | Pick a transition |
-| `:JiraStart [key]` | Move to In Progress |
-| `:JiraReview [key]` | Move to In Review |
-| `:JiraDone [key]` | Move to Done |
-
-#### Comments and Links
-
-| Command | Description |
-|---|---|
-| `:JiraComment add\|edit\|delete [key]` | Manage comments |
-| `:JiraLink add\|delete [key]` | Manage issue links |
-
-#### JQL Filters
-
-| Command | Description |
-|---|---|
-| `:JiraFilter save [name]` | Save current JQL filter |
-| `:JiraFilter load` | Load a saved filter |
-| `:JiraFilter list` | List saved filters |
-| `:JiraFilter delete` | Delete a saved filter |
-
-#### Agile Boards
-
-| Command | Description |
-|---|---|
-| `:JiraBoard [board_id]` | Kanban board view |
-| `:JiraSprint [board_id]` | Sprint board view |
-| `:JiraTeam [project]` | Team workload dashboard |
-
-#### Offline Queue
-
-| Command | Description |
-|---|---|
-| `:JiraQueue` | View pending offline edits |
-| `:JiraSync` | Sync queued edits to Jira |
-
-Edits are automatically queued when Jira is unreachable and synced on reconnect. Supports queued updates, transitions, comments, and issue creation.
-
-#### Utilities
-
-| Command | Description |
-|---|---|
-| `:JiraTodoToIssue [buffer\|project]` | Convert TODO comments to Sub-Tasks |
-| `:JiraRefresh` | Clear cache |
-| `:JiraStatus` | Show connection status |
-| `:JiraFields [key]` | Inspect issue fields |
-| `:JiraTypes [project]` | List issue types |
+- [x] Extensive help documents (`:help atlassian-jira`)
+- [x] Search and Navigate your spaces; command shortcuts for assigned-to-me (`:JiraMe`), created-by-me (`:JiraCreatedByMe`),
+  assigned-but-not-created-by-me (`:JiraAssignedNotCreated`)
+- [x] Commands targeting specific issue levels (epics, features, tasks)
+- [x] Edit, view and create new Jira issues; auto-populating buffers from Jira templates
+- [x] Transition Jira issues
+- [x] Manage issue links, and edit/add comments on issues
+- [x] Custom JQL filters management through `:JiraFilter` (if the above isn't enough)
+- [x] Agile Boards support (eg. `:JiraBoard` and `:JitaTeams`)
+- [x] Offline Queue and sync later
 
 ### Confluence
 
-#### Navigation
-
-| Command | Description |
-|---|---|
-| `:ConfluenceSpaces` | List spaces |
-| `:ConfluencePages [space_key]` | List pages in space |
-| `:ConfluenceRecent` | Recently updated pages |
-
-#### Search
-
-| Command | Description |
-|---|---|
-| `:ConfluenceSearch [query]` | Search pages |
-| `:ConfluenceSearchEdit [query]` | Search and edit |
-| `:ConfluenceSearchCQL [query]` | Raw CQL search |
-| `:ConfluenceMentions [user]` | Pages mentioning a user |
-
-#### Page Management
-
-| Command | Description |
-|---|---|
-| `:ConfluenceView <page_id>` | View page |
-| `:ConfluenceEdit <page_id>` | Edit page in CSF buffer |
-| `:ConfluenceCreate [space_key]` | Create new page |
-| `:ConfluenceDelete <page_id>` | Delete page (with confirmation) |
-
-#### CQL Filters
-
-| Command | Description |
-|---|---|
-| `:ConfluenceCQLFilter save\|load\|list\|delete [name]` | Manage saved CQL filters |
-
-#### Utilities
-
-| Command | Description |
-|---|---|
-| `:ConfluenceRefresh` | Clear cache |
-| `:ConfluenceStatus` | Show connection status |
+- Search and navigate spaces, including getting pages which mention a user
+- Custom JQL filters support
+- Edit, view and create new confluence pages
 
 ### CSF Rich Editing
+
+> [!IMPORTANT]
+> I'm still figuring this section out, so expect frequent changes here.
+> Mainly, conceals get in the way of efficient vim-style editing, but it is
+> not interesting to look at XML content - so a good comprise must be found
 
 Both Jira and Confluence content is edited in CSF buffers with:
 

@@ -95,7 +95,7 @@ vim.api.nvim_create_autocmd('FileType', {
             local win = vim.fn.bufwinid(buf)
             if win == -1 then return end
             vim.wo[win].conceallevel = 2
-            vim.wo[win].concealcursor = "nc"
+            vim.wo[win].concealcursor = ""
             vim.wo[win].wrap = true
             vim.wo[win].linebreak = true
         end)
