@@ -155,42 +155,7 @@ require("atlassian.icons").setup({
                 inline_macro = "mathinline",
                 inline_param = "body",
             },
-            -- Templates: expanded as LuaSnip snippets in issue create buffers
-            templates = {
-                default = {
-                    description_sections = {},
-                    acceptance_criteria = { "Criteria" },
-                },
-                epic = {
-                    description_sections = {
-                        { heading = "Overview", placeholder = "High-level overview" },
-                        { heading = "Goals", placeholder = "Goals" },
-                        { heading = "Scope", placeholder = "Scope" },
-                    },
-                    acceptance_criteria = { "All child features completed", "Documentation updated" },
-                },
-                feature = {
-                    description_sections = {
-                        { heading = "Problem", placeholder = "Describe the problem" },
-                        { heading = "Solution", placeholder = "Proposed solution" },
-                        { heading = "Technical Notes", placeholder = "Technical details" },
-                    },
-                    acceptance_criteria = { "Implementation complete", "Tests passing", "Code reviewed" },
-                },
-                bug = {
-                    description_sections = {
-                        { heading = "Steps to Reproduce", placeholder = "1. First step" },
-                        { heading = "Expected Behavior", placeholder = "Expected behavior" },
-                        { heading = "Actual Behavior", placeholder = "Actual behavior" },
-                        { heading = "Environment", placeholder = "Environment details" },
-                    },
-                    acceptance_criteria = { "Bug fixed", "Tests added", "No regression" },
-                },
-                task = {
-                    description_sections = {},
-                    acceptance_criteria = { "Task completed", "Verified working" },
-                },
-            },
+            templates = {},
         })
 
         -- Confluence setup (all options shown with defaults)

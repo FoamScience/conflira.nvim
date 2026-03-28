@@ -64,44 +64,7 @@ M.defaults = {
     },
     custom_fields = {},
     data_dir = vim.fn.stdpath("data") .. "/jira-interface",
-    -- Templates: structured data expanded as LuaSnip snippets in the create buffer.
-    -- description_sections: list of { heading, placeholder } pairs rendered as ### sub-headings.
-    -- acceptance_criteria: list of checklist item placeholder strings.
-    templates = {
-        default = {
-            description_sections = {},
-            acceptance_criteria = { "Criteria" },
-        },
-        epic = {
-            description_sections = {
-                { heading = "Overview", placeholder = "High-level overview" },
-                { heading = "Goals", placeholder = "Goals" },
-                { heading = "Scope", placeholder = "Scope" },
-            },
-            acceptance_criteria = { "All child features completed", "Documentation updated" },
-        },
-        feature = {
-            description_sections = {
-                { heading = "Problem", placeholder = "Describe the problem" },
-                { heading = "Solution", placeholder = "Proposed solution" },
-                { heading = "Technical Notes", placeholder = "Technical details" },
-            },
-            acceptance_criteria = { "Implementation complete", "Tests passing", "Code reviewed" },
-        },
-        bug = {
-            description_sections = {
-                { heading = "Steps to Reproduce", placeholder = "1. First step" },
-                { heading = "Expected Behavior", placeholder = "Expected behavior" },
-                { heading = "Actual Behavior", placeholder = "Actual behavior" },
-                { heading = "Environment", placeholder = "Environment details" },
-            },
-            acceptance_criteria = { "Bug fixed", "Tests added", "No regression" },
-        },
-        task = {
-            description_sections = {},
-            acceptance_criteria = { "Task completed", "Verified working" },
-        },
-    },
+    templates = {},
     display = {
         mode = "float",     -- "float", "vsplit", "split", "tab"
         width = "80%",      -- number (columns) or string ("80%")
