@@ -9,36 +9,25 @@ vim.filetype.add({
     extension = { csf = "csf" },
 })
 
--- Register CSF parser with nvim-treesitter immediately and on TSUpdate
-local function register_csf_parser()
-    local ok, parsers = pcall(require, 'nvim-treesitter.parsers')
-    if ok then
-        parsers.csf = {
-            install_info = {
-                url = 'https://github.com/FoamScience/tree-sitter-csf',
-                queries = 'queries/',
-            },
-        }
-    end
-end
-
-register_csf_parser()
-
+-- Defer all treesitter/parser work to first CSF buffer open
 vim.api.nvim_create_autocmd('User', {
     pattern = 'TSUpdate',
-    callback = register_csf_parser,
+    callback = function()
+        local ok, parsers = pcall(require, 'nvim-treesitter.parsers')
+        if ok then
+            parsers.csf = {
+                install_info = {
+                    url = 'https://github.com/FoamScience/tree-sitter-csf',
+                    queries = 'queries/',
+                },
+            }
+        end
+    end,
 })
 
--- Auto-install CSF parser if not already installed
-vim.defer_fn(function()
-    if not pcall(vim.treesitter.language.inspect, 'csf') then
-        register_csf_parser()
-        vim.cmd('TSInstall csf')
-    end
-end, 100)
-
--- Set up conceal queries: merge static conceal.scm + dynamic icon-based queries
--- into the "conceal" query group. Highlights stay separate in "highlights" group.
+-- Merge highlights + conceal queries into a single "highlights" query group
+-- so vim.treesitter.start() picks everything up together.
+-- This is the approach from the original nvim config that is known to work.
 do
     local done = false
     vim.api.nvim_create_autocmd('FileType', {
@@ -47,28 +36,47 @@ do
         callback = function()
             if done then return end
             done = true
+
+            -- Register parser with nvim-treesitter (deferred to first use)
+            local ok, parsers = pcall(require, 'nvim-treesitter.parsers')
+            if ok then
+                parsers.csf = {
+                    install_info = {
+                        url = 'https://github.com/FoamScience/tree-sitter-csf',
+                        queries = 'queries/',
+                    },
+                }
+            end
+
+            -- Auto-install CSF parser if not already installed
+            if not pcall(vim.treesitter.language.inspect, 'csf') then
+                vim.cmd('TSInstall csf')
+                return -- will work on next buffer open after install
+            end
+
             pcall(function()
-                -- Build conceal query from static files + dynamic icon queries
-                local conceal_sources = {}
+                local sources = {}
                 local seen = {}
-                for _, f in ipairs(vim.api.nvim_get_runtime_file('queries/csf/conceal.scm', true)) do
+                -- Load static highlights.scm (syntax highlighting)
+                for _, f in ipairs(vim.api.nvim_get_runtime_file('queries/csf/highlights.scm', true)) do
                     local content = table.concat(vim.fn.readfile(f), '\n')
                     content = content:gsub('^;; extends%s*\n?', '')
                     if content ~= '' and not seen[content] then
                         seen[content] = true
-                        table.insert(conceal_sources, content)
+                        table.insert(sources, content)
                     end
                 end
-                -- Append dynamically generated conceal queries with nerd font icons
+                -- Dynamic conceal queries with nerd font icons (replaces static conceal.scm)
                 local dyn_ok, csf_queries = pcall(require, 'atlassian.csf.queries')
                 if dyn_ok then
                     local dynamic = csf_queries.conceal()
                     if dynamic and dynamic ~= '' then
-                        table.insert(conceal_sources, dynamic)
+                        table.insert(sources, dynamic)
                     end
                 end
-                if #conceal_sources > 0 then
-                    vim.treesitter.query.set('csf', 'conceal', table.concat(conceal_sources, '\n'))
+                if #sources > 0 then
+                    vim.treesitter.query.set('csf', 'highlights', table.concat(sources, '\n'))
+                    vim.treesitter.query.set('csf', 'conceal', '')
                 end
             end)
         end,

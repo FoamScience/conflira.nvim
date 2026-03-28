@@ -92,30 +92,32 @@ function M.conceal()
     add(('(Comment) @comment (#set! conceal "%s")'):format(ellipsis))
 
     -- ── AC: Task elements ──
-    -- Capture entire ac_start_tag / ac_end_tag (not just tag name) to hide `<` and `>`
-    -- Task internals stay on one line: <ac:task><ac:task-status>X</ac:task-status><ac:task-body>text</ac:task-body></ac:task>
-    -- Renders as: ☐ text  (or ☑ text for complete)
+    -- Split-tag conceal (same approach as headings): put icon on "<" token,
+    -- hide everything else. Uses CharData predicate to pick the right icon.
+    --
+    -- <ac:task><ac:task-status>incomplete</ac:task-status><ac:task-body>text</ac:task-body></ac:task>
+    -- Renders as: ○ text  (or  text for complete)
 
     -- ac:task-list wrapper → hidden
     add('(ac_element (ac_start_tag (ac_tag_name) @_t) @conceal (#eq? @_t "ac:task-list") (#set! conceal ""))')
     add('(ac_element (ac_end_tag   (ac_tag_name) @_t) @conceal (#eq? @_t "ac:task-list") (#set! conceal ""))')
-    -- ac:task → hidden (checkbox comes from status text below)
+    -- ac:task → hidden
     add('(ac_element (ac_start_tag (ac_tag_name) @_t) @conceal (#eq? @_t "ac:task") (#set! conceal ""))')
     add('(ac_element (ac_end_tag   (ac_tag_name) @_t) @conceal (#eq? @_t "ac:task") (#set! conceal ""))')
     -- ac:task-id → hidden (start tag, content, end tag)
     add('(ac_element (ac_start_tag (ac_tag_name) @_t) @conceal (#eq? @_t "ac:task-id") (#set! conceal ""))')
     add('(ac_element (ac_end_tag   (ac_tag_name) @_t) @conceal (#eq? @_t "ac:task-id") (#set! conceal ""))')
     add('(ac_element (ac_start_tag (ac_tag_name) @_t) (content (CharData) @conceal) (#eq? @_t "ac:task-id") (#set! conceal ""))')
-    -- ac:task-status → checkbox icon based on status text
-    -- Use @conceal for reliable concealing, then separate highlight queries for coloring
-    add('(ac_element (ac_start_tag (ac_tag_name) @_t) @conceal (#eq? @_t "ac:task-status") (#set! conceal ""))')
+    -- ac:task-status → split-tag: icon on "<", hide rest
+    -- "<" gets the checkbox icon (incomplete/complete chosen by CharData predicate)
+    add(('(ac_element (ac_start_tag "<" @markup.list.unchecked (ac_tag_name) @_t) (content (CharData) @_s) (#eq? @_t "ac:task-status") (#eq? @_s "incomplete") (#set! conceal "%s"))'):format(check_no))
+    add(('(ac_element (ac_start_tag "<" @markup.list.checked   (ac_tag_name) @_t) (content (CharData) @_s) (#eq? @_t "ac:task-status") (#eq? @_s "complete")   (#set! conceal "%s"))'):format(check_yes))
+    -- Hide tag name, ">", content text, and end tag
+    add('(ac_element (ac_start_tag (ac_tag_name) @conceal) (#eq? @conceal "ac:task-status") (#set! conceal ""))')
+    add('(ac_element (ac_start_tag (ac_tag_name) @_t ">" @conceal) (#eq? @_t "ac:task-status") (#set! conceal ""))')
+    add('(ac_element (ac_start_tag (ac_tag_name) @_t) (content (CharData) @conceal) (#eq? @_t "ac:task-status") (#set! conceal ""))')
     add('(ac_element (ac_end_tag   (ac_tag_name) @_t) @conceal (#eq? @_t "ac:task-status") (#set! conceal ""))')
-    add(('(ac_element (ac_start_tag (ac_tag_name) @_t) (content (CharData) @conceal) (#eq? @_t "ac:task-status") (#eq? @conceal "incomplete") (#set! conceal "%s"))'):format(check_no))
-    add(('(ac_element (ac_start_tag (ac_tag_name) @_t) (content (CharData) @conceal) (#eq? @_t "ac:task-status") (#eq? @conceal "complete")   (#set! conceal "%s"))'):format(check_yes))
-    -- Highlight groups for checkbox coloring (applied on top of conceal)
-    add('(ac_element (ac_start_tag (ac_tag_name) @_t) (content (CharData) @markup.list.unchecked) (#eq? @_t "ac:task-status") (#match? @markup.list.unchecked "incomplete"))')
-    add('(ac_element (ac_start_tag (ac_tag_name) @_t) (content (CharData) @markup.list.checked)   (#eq? @_t "ac:task-status") (#match? @markup.list.checked "complete"))')
-    -- ac:task-body → space before content (creates gap between checkbox and text)
+    -- ac:task-body → space before content
     add('(ac_element (ac_start_tag (ac_tag_name) @_t) @punctuation.special (#eq? @_t "ac:task-body") (#set! conceal " "))')
     add('(ac_element (ac_end_tag   (ac_tag_name) @_t) @conceal (#eq? @_t "ac:task-body") (#set! conceal ""))')
 
