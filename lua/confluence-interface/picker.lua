@@ -471,7 +471,7 @@ function M.create_page(space_key, parent_id)
                 space_map[s.key .. " - " .. s.name] = s
             end
 
-            vim.ui.select(space_names, { prompt = "Select space:" }, function(choice)
+            require("snacks").picker.select(space_names, { prompt = "Select space:" }, function(choice)
                 if choice then
                     local space = space_map[choice]
                     M.create_page(space.key, parent_id)

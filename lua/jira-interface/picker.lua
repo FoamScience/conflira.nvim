@@ -456,7 +456,7 @@ function M.create_issue(type_name, project, parent_key)
                 project_map[p.key .. " - " .. p.name] = p.key
             end
 
-            vim.ui.select(project_names, { prompt = "Select project:" }, function(choice)
+            require("snacks").picker.select(project_names, { prompt = "Select project:" }, function(choice)
                 if choice then
                     M.create_issue(type_name, project_map[choice], parent_key)
                 end
@@ -506,7 +506,7 @@ function M.create_issue(type_name, project, parent_key)
             type_map[label] = it
         end
 
-        vim.ui.select(display_names, { prompt = "Issue type:" }, function(choice)
+        require("snacks").picker.select(display_names, { prompt = "Issue type:" }, function(choice)
             if choice then
                 M.after_type_selected(project, type_map[choice], parent_key)
             end
@@ -594,7 +594,7 @@ function M.run_picker_chain(picker_fields, values, callback)
         prompt = prompt .. " (required)"
     end
 
-    vim.ui.select(display_names, { prompt = prompt .. ":" }, function(choice)
+    require("snacks").picker.select(display_names, { prompt = prompt .. ":" }, function(choice)
         if not choice then
             -- User cancelled: if required, abort; otherwise skip
             if field.required then

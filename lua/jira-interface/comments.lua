@@ -269,7 +269,7 @@ function M.select_comment(issue_key, comments, action_name, cb)
         table.insert(items, string.format("%s (%s): %s", comment.author_name, time_str, preview))
     end
 
-    vim.ui.select(items, { prompt = "Select comment to " .. action_name .. ":" }, function(_, idx)
+    require("snacks").picker.select(items, { prompt = "Select comment to " .. action_name .. ":" }, function(_, idx)
         if not idx then
             return
         end

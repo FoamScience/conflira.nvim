@@ -235,7 +235,7 @@ function M.show_transition_picker(key, current_status)
             end
         end
 
-        vim.ui.select(items, { prompt = "Select transition:" }, function(choice, idx)
+        require("snacks").picker.select(items, { prompt = "Select transition:" }, function(choice, idx)
             if not choice then
                 return
             end
@@ -272,7 +272,7 @@ function M.show_assign_picker(key, project)
             table.insert(items, m.displayName)
         end
 
-        vim.ui.select(items, { prompt = "Assign " .. key .. " to:" }, function(choice, idx)
+        require("snacks").picker.select(items, { prompt = "Assign " .. key .. " to:" }, function(choice, idx)
             if not choice then
                 return
             end

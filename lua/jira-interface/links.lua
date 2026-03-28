@@ -90,7 +90,7 @@ function M.add_link(issue_key)
             table.insert(item_data, { type_name = lt.name, direction = "inward", label = lt.inward })
         end
 
-        vim.ui.select(items, { prompt = "Link type:" }, function(_, idx)
+        require("snacks").picker.select(items, { prompt = "Link type:" }, function(_, idx)
             if not idx then
                 return
             end
@@ -157,7 +157,7 @@ function M.delete_link(issue_key, links)
         table.insert(items, link.label .. " " .. link.issue_key .. ": " .. link.issue_summary)
     end
 
-    vim.ui.select(items, { prompt = "Select link to delete:" }, function(_, idx)
+    require("snacks").picker.select(items, { prompt = "Select link to delete:" }, function(_, idx)
         if not idx then
             return
         end
