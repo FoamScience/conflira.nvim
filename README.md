@@ -159,6 +159,10 @@ require("atlassian.icons").setup({
                 inline_param = "body",
             },
             templates = {}, -- @deprecated
+            hunks = {
+                enabled = true,           -- set to false to disable :JiraHunks
+                refresh_debounce = 500,   -- ms to wait after save before refreshing
+            },
         })
 
         -- Confluence setup (all options shown with defaults)
@@ -266,6 +270,36 @@ end
 - [x] Custom JQL filters management through `:JiraFilter` (if the above isn't enough)
 - [x] Agile Boards support (eg. `:JiraBoard` and `:JitaTeams`)
 - [x] Offline Queue and sync later
+- [x] Git Hunk Tracking (`:JiraHunks`)
+
+### Git Hunk Tracking
+
+Track your unstaged and staged changes in a quickfix list, tied to a Jira issue. Works across multiple repositories.
+
+```
+:JiraHunks PROJ-123                    " track changes in cwd
+:JiraHunks PROJ-123 ~/repo1 ~/repo2   " track changes across repos
+:JiraHunks                             " pick issue from branch or picker
+:JiraHunksStop                         " stop auto-refresh
+```
+
+The quickfix list auto-refreshes on file save (debounced). Committed changes automatically disappear from the list.
+
+To disable this feature:
+
+```lua
+require("jira-interface").setup({
+    hunks = { enabled = false },
+})
+```
+
+The debounce interval (default 500ms) is configurable:
+
+```lua
+require("jira-interface").setup({
+    hunks = { refresh_debounce = 1000 },
+})
+```
 
 ### Confluence
 

@@ -447,6 +447,28 @@ function M.create_commands()
         end,
     })
 
+    -- Git hunk tracking
+    if config.options.hunks and config.options.hunks.enabled then
+        cmd("JiraHunks", function(args)
+            local context = require("jira-interface.context")
+            local parts = vim.split(args.args or "", "%s+", { trimempty = true })
+            local key_arg = parts[1]
+            local repo_args = vim.list_slice(parts, 2)
+
+            context.resolve_issue_key_or_pick(key_arg, function(key)
+                local hunks = require("jira-interface.hunks")
+                local paths = #repo_args > 0 and repo_args or { vim.fn.getcwd() }
+                paths = vim.tbl_map(function(p) return vim.fn.expand(p) end, paths)
+                hunks.show_hunks(key, paths)
+            end)
+        end, { nargs = "*", desc = "Track working changes for a Jira issue across repos" })
+
+        cmd("JiraHunksStop", function()
+            require("jira-interface.hunks").stop()
+            notify.info("Hunk tracking stopped")
+        end, { desc = "Stop tracking git hunks" })
+    end
+
     -- Utility commands
     cmd("JiraRefresh", function()
         local cache = require("jira-interface.cache")
