@@ -2,15 +2,7 @@
 
 -- Default @conceal highlight: link to Special instead of Comment (grey)
 vim.api.nvim_set_hl(0, '@conceal.csf', { link = 'Special' })
-vim.filetype.add({
-    pattern = {
-        ["csf://.*"] = "csf",
-        ["confluence_storage:.*"] = "csf",
-        ["confluence://.*"] = "csf",
-        ["jira://.*"] = "csf",
-    },
-    extension = { csf = "csf" },
-})
+-- Filetype detection is in ftdetect/csf.lua (loaded by Neovim regardless of lazy loading)
 
 -- Defer all treesitter/parser work to first CSF buffer open
 vim.api.nvim_create_autocmd('User', {
