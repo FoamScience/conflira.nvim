@@ -12,6 +12,7 @@ A Neovim plugin for Jira and Confluence integration with rich CSF (Confluence St
 - Neovim >= 0.11.4
 - [nvim-treesitter](https://github.com/nvim-treesitter/nvim-treesitter) — **required** for syntax highlighting, concealing, and CSF editing. The [tree-sitter-csf](https://github.com/FoamScience/tree-sitter-csf) grammar is auto-installed on first use via `:TSInstall csf`
 - [snacks.nvim](https://github.com/folke/snacks.nvim) — picker UI, notifications, and image display
+- [nui-components.nvim](https://github.com/grapp-dev/nui-components.nvim) — UI components for interactive views
 - `curl` — HTTP requests to Jira/Confluence REST APIs
 - A nerd font that has some ligatures support. You can get some with [getnf](https://github.com/getnf/getnf)
 - An Atlassian API token
@@ -29,7 +30,7 @@ A Neovim plugin for Jira and Confluence integration with rich CSF (Confluence St
 -- entry points are split into jira-interface and confluence-interface
 {
     "FoamScience/conflira.nvim",
-    dependencies = { "folke/snacks.nvim" },
+    dependencies = { "folke/snacks.nvim", "grapp-dev/nui-components.nvim" },
     config = function()
         require("jira-interface").setup({
             auth = {
@@ -107,6 +108,7 @@ require("atlassian.icons").setup({
     "FoamScience/conflira.nvim",
     dependencies = {
         "folke/snacks.nvim",
+        "grapp-dev/nui-components.nvim",
         "nvim-treesitter/nvim-treesitter",
     },
     config = function()
