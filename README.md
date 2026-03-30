@@ -246,11 +246,10 @@ require("atlassian.icons").setup({
 { "<leader>cC", "<cmd>ConfluenceSearchEdit<cr>", desc = "Search & edit" },
 ```
 
-To avoid circular dependency when checking plugin availability, use runtimepath checks instead of `pcall(require, ...)`:
+To check plugin availability before registering keybindings:
 
 ```lua
-local jira_ok = vim.env.JIRA_API_TOKEN
-    and #vim.api.nvim_get_runtime_file("lua/jira-interface/init.lua", false) > 0
+local jira_ok = vim.env.JIRA_API_TOKEN and pcall(require, "jira-interface")
 if jira_ok then
     -- register Jira keybindings
 end
