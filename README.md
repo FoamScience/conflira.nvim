@@ -31,6 +31,7 @@ A Neovim plugin for Jira and Confluence integration with rich CSF (Confluence St
 {
     "FoamScience/conflira.nvim",
     dependencies = { "folke/snacks.nvim", "grapp-dev/nui-components.nvim" },
+    ft = "csf", -- required: tells lazy.nvim to source ftdetect/ early for .csf filetype detection
     config = function()
         require("jira-interface").setup({
             auth = {
@@ -111,6 +112,7 @@ require("atlassian.icons").setup({
         "grapp-dev/nui-components.nvim",
         "nvim-treesitter/nvim-treesitter",
     },
+    ft = "csf", -- required: tells lazy.nvim to source ftdetect/ early for .csf filetype detection
     config = function()
         -- Jira setup (all options shown with defaults)
         require("jira-interface").setup({
