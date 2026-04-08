@@ -79,6 +79,7 @@ end
 ---@param todos TodoItem[]
 function M.show_todo_picker(todos)
     local Snacks = require("snacks")
+    local atlassian_ui = require("atlassian.ui")
 
     local items = {}
     for idx, todo in ipairs(todos) do
@@ -90,21 +91,17 @@ function M.show_todo_picker(todos)
             lnum = todo.lnum,
             keyword = todo.keyword,
             todo_text = todo.text,
-            selected = false,
         })
     end
 
-    -- Track selections
-    local selected = {}
+    local ms = atlassian_ui.multiselect(items)
+    local ms_actions = atlassian_ui.multiselect_actions(ms)
 
     Snacks.picker.pick({
         title = "Select TODOs to Convert (" .. #todos .. " found)",
         items = items,
         format = function(item, _picker)
             local ret = {}
-            -- Selection indicator
-            local is_selected = selected[item.idx]
-            table.insert(ret, { is_selected and "[x] " or "[ ] ", is_selected and "String" or "Comment" })
             -- Location
             table.insert(ret, { item.file .. ":" .. item.lnum, "Comment" })
             table.insert(ret, { "  ", "Normal" })
@@ -115,21 +112,10 @@ function M.show_todo_picker(todos)
             table.insert(ret, { "@" .. item.keyword .. ": ", keyword_hl })
             -- Text
             table.insert(ret, { item.todo_text, "Normal" })
-            return ret
+            return atlassian_ui.multiselect_indicator(ret, ms, item)
         end,
         confirm = function(picker, item)
-            -- On confirm, proceed with selected items
-            local selected_todos = {}
-            for idx, _ in pairs(selected) do
-                table.insert(selected_todos, todos[idx])
-            end
-
-            if #selected_todos == 0 then
-                -- If nothing selected, use current item
-                if item and item.todo then
-                    selected_todos = { item.todo }
-                end
-            end
+            local selected_todos = ms.get_selected(item, "todo")
 
             if #selected_todos > 0 then
                 picker:close()
@@ -138,29 +124,7 @@ function M.show_todo_picker(todos)
                 notify.warn("No TODOs selected")
             end
         end,
-        actions = {
-            toggle = function(picker, item)
-                if item then
-                    if selected[item.idx] then
-                        selected[item.idx] = nil
-                    else
-                        selected[item.idx] = true
-                    end
-                    -- Refresh display
-                    picker:refresh()
-                end
-            end,
-            select_all = function(picker, _)
-                for _, item in ipairs(items) do
-                    selected[item.idx] = true
-                end
-                picker:refresh()
-            end,
-            select_none = function(picker, _)
-                selected = {}
-                picker:refresh()
-            end,
-        },
+        actions = ms_actions,
         layout = {
             layout = {
                 box = "vertical",
@@ -178,11 +142,7 @@ function M.show_todo_picker(todos)
         preview = false,
         win = {
             input = {
-                keys = {
-                    ["<Tab>"] = { "toggle", mode = { "n", "i" }, desc = "Toggle selection" },
-                    ["<C-a>"] = { "select_all", mode = { "n", "i" }, desc = "Select all" },
-                    ["<C-n>"] = { "select_none", mode = { "n", "i" }, desc = "Select none" },
-                },
+                keys = atlassian_ui.multiselect_keys,
             },
         },
     })
@@ -238,6 +198,7 @@ end
 ---@param tasks JiraIssue[]
 function M.show_task_picker(selected_todos, tasks)
     local Snacks = require("snacks")
+    local atlassian_ui = require("atlassian.ui")
 
     local items = {}
     for idx, task in ipairs(tasks) do
@@ -254,6 +215,9 @@ function M.show_task_picker(selected_todos, tasks)
         })
     end
 
+    local ms = atlassian_ui.multiselect(items)
+    local ms_actions = atlassian_ui.multiselect_actions(ms)
+
     Snacks.picker.pick({
         title = "Select Parent Task for " .. #selected_todos .. " Sub-Task(s)",
         items = items,
@@ -265,7 +229,7 @@ function M.show_task_picker(selected_todos, tasks)
             table.insert(ret, { item.status, item.status_hl })
             table.insert(ret, { "  ", "Normal" })
             table.insert(ret, { item.summary, "Normal" })
-            return ret
+            return atlassian_ui.multiselect_indicator(ret, ms, item)
         end,
         confirm = function(picker, item)
             if item and item.task then
@@ -273,6 +237,7 @@ function M.show_task_picker(selected_todos, tasks)
                 M.create_subtasks(selected_todos, item.task)
             end
         end,
+        actions = ms_actions,
         layout = {
             layout = {
                 box = "vertical",
@@ -288,6 +253,11 @@ function M.show_task_picker(selected_todos, tasks)
             },
         },
         preview = false,
+        win = {
+            input = {
+                keys = atlassian_ui.multiselect_keys,
+            },
+        },
     })
 end
 

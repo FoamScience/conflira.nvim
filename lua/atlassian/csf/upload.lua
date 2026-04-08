@@ -50,11 +50,15 @@ function M.upload_attachment(buf)
                 return
             end
             notify.progress_finish("upload", "Uploaded: " .. filename)
-            -- Extract attachment ID from response (Jira returns an array)
+            -- Extract attachment ID from response (Jira returns an array).
+            -- Jira ADF media nodes require the UUID (mediaApiFileId), not the numeric id.
             local attachment_id
             if type(data) == "table" then
                 local attachment = data[1] or data
-                attachment_id = attachment and tostring(attachment.id)
+                if attachment then
+                    attachment_id = attachment.mediaApiFileId and tostring(attachment.mediaApiFileId)
+                        or tostring(attachment.id)
+                end
             end
             M.insert_tag(buf, filename, attachment_id)
         end

@@ -383,22 +383,29 @@ function M.pick_board(boards)
         })
     end
 
+    local atlassian_ui = require("atlassian.ui")
+    local ms = atlassian_ui.multiselect(items)
+    local ms_actions = atlassian_ui.multiselect_actions(ms)
+
     Snacks.picker.pick({
         title = "Jira Boards",
         items = items,
         format = function(item, _picker)
-            return {
+            local ret = {
                 { pad_right(item.board_type, 8), "Special" },
                 { " ", "Normal" },
                 { item.name, "Normal" },
             }
+            return atlassian_ui.multiselect_indicator(ret, ms, item)
         end,
         confirm = function(picker, item)
             picker:close()
-            if item and item.board then
-                M.load_board(item.board.id)
+            local selected = ms.get_selected(item, "board")
+            for _, board in ipairs(selected) do
+                M.load_board(board.id)
             end
         end,
+        actions = ms_actions,
         layout = {
             layout = {
                 box = "vertical",
@@ -414,6 +421,11 @@ function M.pick_board(boards)
             },
         },
         preview = false,
+        win = {
+            input = {
+                keys = atlassian_ui.multiselect_keys,
+            },
+        },
     })
 end
 
@@ -511,18 +523,25 @@ function M.show_sprint(board_id)
             })
         end
 
+        local atlassian_ui = require("atlassian.ui")
+        local ms = atlassian_ui.multiselect(items)
+        local ms_actions = atlassian_ui.multiselect_actions(ms)
+
         Snacks.picker.pick({
             title = "Select Scrum Board",
             items = items,
             format = function(item, _picker)
-                return { { item.name, "Normal" } }
+                local ret = { { item.name, "Normal" } }
+                return atlassian_ui.multiselect_indicator(ret, ms, item)
             end,
             confirm = function(picker, item)
                 picker:close()
-                if item and item.board then
-                    M.pick_sprint(item.board.id)
+                local selected = ms.get_selected(item, "board")
+                for _, board in ipairs(selected) do
+                    M.pick_sprint(board.id)
                 end
             end,
+            actions = ms_actions,
             layout = {
                 layout = {
                     box = "vertical",
@@ -538,6 +557,11 @@ function M.show_sprint(board_id)
                 },
             },
             preview = false,
+            win = {
+                input = {
+                    keys = atlassian_ui.multiselect_keys,
+                },
+            },
         })
     end)
 end
@@ -580,6 +604,10 @@ function M.pick_sprint(board_id)
             })
         end
 
+        local atlassian_ui = require("atlassian.ui")
+        local ms = atlassian_ui.multiselect(items)
+        local ms_actions = atlassian_ui.multiselect_actions(ms)
+
         Snacks.picker.pick({
             title = "Sprints",
             items = items,
@@ -587,19 +615,22 @@ function M.pick_sprint(board_id)
                 local state_hl = item.state == "active" and "Function"
                     or item.state == "future" and "Type"
                     or "Comment"
-                return {
+                local ret = {
                     { item.state_icon .. " ", state_hl },
                     { pad_right(item.state, 8), state_hl },
                     { " ", "Normal" },
                     { item.name, "Normal" },
                 }
+                return atlassian_ui.multiselect_indicator(ret, ms, item)
             end,
             confirm = function(picker, item)
                 picker:close()
-                if item and item.sprint then
-                    M.load_sprint(board_id, item.sprint)
+                local selected = ms.get_selected(item, "sprint")
+                for _, sprint in ipairs(selected) do
+                    M.load_sprint(board_id, sprint)
                 end
             end,
+            actions = ms_actions,
             layout = {
                 layout = {
                     box = "vertical",
@@ -615,6 +646,11 @@ function M.pick_sprint(board_id)
                 },
             },
             preview = false,
+            win = {
+                input = {
+                    keys = atlassian_ui.multiselect_keys,
+                },
+            },
         })
     end)
 end
@@ -667,28 +703,34 @@ function M.select_project_then_board()
             })
         end
 
+        local atlassian_ui = require("atlassian.ui")
+        local ms = atlassian_ui.multiselect(items)
+        local ms_actions = atlassian_ui.multiselect_actions(ms)
+
         Snacks.picker.pick({
             title = "Select Project for Board",
             items = items,
             format = function(item, _picker)
-                return {
+                local ret = {
                     { pad_right(item.key, 10), "Special" },
                     { "  ", "Normal" },
                     { item.name, "Normal" },
                 }
+                return atlassian_ui.multiselect_indicator(ret, ms, item)
             end,
             confirm = function(picker, item)
                 picker:close()
-                if item and item.project then
+                local selected = ms.get_selected(item, "project")
+                for _, project in ipairs(selected) do
                     notify.progress_start("boards", "Loading boards...")
-                    M.get_boards(item.project.key, function(board_err, boards)
+                    M.get_boards(project.key, function(board_err, boards)
                         notify.progress_finish("boards")
                         if board_err then
                             notify.error("Failed to load boards: " .. board_err)
                             return
                         end
                         if not boards or #boards == 0 then
-                            notify.info("No boards found for " .. item.project.key)
+                            notify.info("No boards found for " .. project.key)
                             return
                         end
                         if #boards == 1 then
@@ -699,6 +741,7 @@ function M.select_project_then_board()
                     end)
                 end
             end,
+            actions = ms_actions,
             layout = {
                 layout = {
                     box = "vertical",
@@ -714,6 +757,11 @@ function M.select_project_then_board()
                 },
             },
             preview = false,
+            win = {
+                input = {
+                    keys = atlassian_ui.multiselect_keys,
+                },
+            },
         })
     end)
 end
@@ -744,21 +792,27 @@ function M.select_project_then_sprint()
             })
         end
 
+        local atlassian_ui = require("atlassian.ui")
+        local ms = atlassian_ui.multiselect(items)
+        local ms_actions = atlassian_ui.multiselect_actions(ms)
+
         Snacks.picker.pick({
             title = "Select Project for Sprint",
             items = items,
             format = function(item, _picker)
-                return {
+                local ret = {
                     { pad_right(item.key, 10), "Special" },
                     { "  ", "Normal" },
                     { item.name, "Normal" },
                 }
+                return atlassian_ui.multiselect_indicator(ret, ms, item)
             end,
             confirm = function(picker, item)
                 picker:close()
-                if item and item.project then
+                local selected = ms.get_selected(item, "project")
+                for _, project in ipairs(selected) do
                     notify.progress_start("boards", "Loading boards...")
-                    M.get_boards(item.project.key, function(board_err, boards)
+                    M.get_boards(project.key, function(board_err, boards)
                         notify.progress_finish("boards")
                         if board_err then
                             notify.error("Failed to load boards: " .. board_err)
@@ -766,18 +820,18 @@ function M.select_project_then_sprint()
                         end
                         local scrum_boards = vim.tbl_filter(function(b) return b.type == "scrum" end, boards)
                         if #scrum_boards == 0 then
-                            notify.info("No scrum boards found for " .. item.project.key)
+                            notify.info("No scrum boards found for " .. project.key)
                             return
                         end
                         if #scrum_boards == 1 then
                             M.pick_sprint(scrum_boards[1].id)
                         else
-                            -- Pick board first
                             M.pick_board(scrum_boards)
                         end
                     end)
                 end
             end,
+            actions = ms_actions,
             layout = {
                 layout = {
                     box = "vertical",
@@ -793,6 +847,11 @@ function M.select_project_then_sprint()
                 },
             },
             preview = false,
+            win = {
+                input = {
+                    keys = atlassian_ui.multiselect_keys,
+                },
+            },
         })
     end)
 end

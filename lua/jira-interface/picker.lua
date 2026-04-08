@@ -57,6 +57,9 @@ function M.show_issues(issues, opts)
         })
     end
 
+    local ms = atlassian_ui.multiselect(items)
+    local ms_actions = atlassian_ui.multiselect_actions(ms)
+
     Snacks.picker.pick({
         title = opts.title or "Jira Issues",
         items = items,
@@ -82,20 +85,25 @@ function M.show_issues(issues, opts)
             table.insert(ret, { " ", "Normal" })
             -- Summary (rest of line)
             table.insert(ret, { item.summary or "", "Normal" })
-            return ret
+            return atlassian_ui.multiselect_indicator(ret, ms, item)
         end,
         confirm = function(picker, item)
             picker:close()
-            if item and item.issue then
+            local selected = ms.get_selected(item, "issue")
+            if #selected > 0 then
                 if opts.on_confirm then
-                    opts.on_confirm(item.issue)
+                    for _, issue in ipairs(selected) do
+                        opts.on_confirm(issue)
+                    end
                 else
                     local ui = require("jira-interface.ui")
-                    ui.view(item.issue.key)
+                    for _, issue in ipairs(selected) do
+                        ui.view(issue.key)
+                    end
                 end
             end
         end,
-        actions = {
+        actions = vim.tbl_extend("force", ms_actions, {
             transition = function(picker, item)
                 if item and item.issue then
                     picker:close()
@@ -104,20 +112,23 @@ function M.show_issues(issues, opts)
                 end
             end,
             copy_key = function(_, item)
-                if item and item.issue then
-                    vim.fn.setreg("+", item.issue.key)
-                    notify.info("Copied: " .. item.issue.key)
+                local selected = ms.get_selected(item, "issue")
+                if #selected > 0 then
+                    local keys = vim.tbl_map(function(i) return i.key end, selected)
+                    vim.fn.setreg("+", table.concat(keys, "\n"))
+                    notify.info("Copied: " .. table.concat(keys, ", "))
                 end
             end,
             copy_url = function(_, item)
-                if item and item.issue then
+                local selected = ms.get_selected(item, "issue")
+                if #selected > 0 then
                     local base_url = config.options.auth.url
                     if not base_url:match("^https?://") then
                         base_url = "https://" .. base_url
                     end
-                    local url = base_url .. "/browse/" .. item.issue.key
-                    vim.fn.setreg("+", url)
-                    notify.info("Copied: " .. url)
+                    local urls = vim.tbl_map(function(i) return base_url .. "/browse/" .. i.key end, selected)
+                    vim.fn.setreg("+", table.concat(urls, "\n"))
+                    notify.info("Copied " .. #urls .. " URL(s)")
                 end
             end,
             edit = function(picker, item)
@@ -134,7 +145,7 @@ function M.show_issues(issues, opts)
                     ui.show_children(item.issue.key)
                 end
             end,
-        },
+        }),
         layout = {
             layout = {
                 box = "vertical",
@@ -152,13 +163,13 @@ function M.show_issues(issues, opts)
         preview = false,
         win = {
             input = {
-                keys = {
+                keys = vim.tbl_extend("force", atlassian_ui.multiselect_keys, {
                     ["<C-t>"] = { "transition", mode = { "n", "i" }, desc = "Transition status" },
                     ["<C-y>"] = { "copy_key", mode = { "n", "i" }, desc = "Copy issue key" },
                     ["<C-u>"] = { "copy_url", mode = { "n", "i" }, desc = "Copy issue URL" },
                     ["<C-e>"] = { "edit", mode = { "n", "i" }, desc = "Edit issue" },
                     ["<C-c>"] = { "children", mode = { "n", "i" }, desc = "Show children" },
-                },
+                }),
             },
         },
     })
@@ -339,6 +350,9 @@ function M.select_project()
             })
         end
 
+        local ms = atlassian_ui.multiselect(items)
+        local ms_actions = atlassian_ui.multiselect_actions(ms)
+
         Snacks.picker.pick({
             title = "Select Project",
             items = items,
@@ -358,18 +372,26 @@ function M.select_project()
             },
             preview = false,
             format = function(item, _picker)
-                return {
+                local ret = {
                     { pad_right(item.key, 10), "Special" },
                     { "  ",                    "Normal" },
                     { item.name,               "Normal" },
                 }
+                return atlassian_ui.multiselect_indicator(ret, ms, item)
             end,
             confirm = function(picker, item)
                 picker:close()
-                if item and item.project then
-                    M.by_project(item.project.key)
+                local selected = ms.get_selected(item, "project")
+                for _, project in ipairs(selected) do
+                    M.by_project(project.key)
                 end
             end,
+            actions = ms_actions,
+            win = {
+                input = {
+                    keys = atlassian_ui.multiselect_keys,
+                },
+            },
         })
     end)
 end
@@ -398,6 +420,9 @@ function M.select_filter()
         })
     end
 
+    local ms = atlassian_ui.multiselect(items)
+    local ms_actions = atlassian_ui.multiselect_actions(ms)
+
     Snacks.picker.pick({
         title = "Select Filter",
         items = items,
@@ -417,18 +442,26 @@ function M.select_filter()
         },
         preview = false,
         format = function(item, _picker)
-            return {
+            local ret = {
                 { pad_right(item.name, 20), "Function" },
                 { "  ",                     "Normal" },
                 { item.scope,               "Comment" },
             }
+            return atlassian_ui.multiselect_indicator(ret, ms, item)
         end,
         confirm = function(picker, item)
             picker:close()
-            if item and item.filter then
-                M.search(item.filter.jql, { title = item.filter.name })
+            local selected = ms.get_selected(item, "filter")
+            for _, filter in ipairs(selected) do
+                M.search(filter.jql, { title = filter.name })
             end
         end,
+        actions = ms_actions,
+        win = {
+            input = {
+                keys = atlassian_ui.multiselect_keys,
+            },
+        },
     })
 end
 
@@ -655,6 +688,9 @@ function M.select_parent(project, issue_type, callback)
             })
         end
 
+        local ms = atlassian_ui.multiselect(items)
+        local ms_actions = atlassian_ui.multiselect_actions(ms)
+
         Snacks.picker.pick({
             title = "Select Parent Issue",
             items = items,
@@ -674,11 +710,12 @@ function M.select_parent(project, issue_type, callback)
             },
             preview = false,
             format = function(item, _picker)
-                return {
+                local ret = {
                     { pad_right(item.key or "(none)", 12), "Special" },
                     { "  ",                                "Normal" },
                     { item.summary or "",                  "Normal" },
                 }
+                return atlassian_ui.multiselect_indicator(ret, ms, item)
             end,
             confirm = function(picker, item)
                 picker:close()
@@ -688,6 +725,12 @@ function M.select_parent(project, issue_type, callback)
                     callback(nil)
                 end
             end,
+            actions = ms_actions,
+            win = {
+                input = {
+                    keys = atlassian_ui.multiselect_keys,
+                },
+            },
         })
     end)
 end

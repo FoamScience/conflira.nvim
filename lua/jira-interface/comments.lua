@@ -258,23 +258,70 @@ function M.select_comment(issue_key, comments, action_name, cb)
         return
     end
 
+    local Snacks = require("snacks")
+    local atlassian_ui = require("atlassian.ui")
+
     local items = {}
-    for _, comment in ipairs(comments) do
+    for idx, comment in ipairs(comments) do
         local time_str = atlassian_format.format_relative_time(comment.created)
         local preview = ""
         if comment.body and type(comment.body) == "table" and comment.body.content then
             local text = require("atlassian.adf").adf_to_text(comment.body)
             preview = text:sub(1, 50):gsub("\n", " ")
         end
-        table.insert(items, string.format("%s (%s): %s", comment.author_name, time_str, preview))
+        table.insert(items, {
+            idx = idx,
+            text = string.format("%s %s %s", comment.author_name, time_str, preview),
+            comment = comment,
+            author = comment.author_name,
+            time = time_str,
+            preview = preview,
+        })
     end
 
-    require("snacks").picker.select(items, { prompt = "Select comment to " .. action_name .. ":" }, function(_, idx)
-        if not idx then
-            return
-        end
-        cb(comments[idx])
-    end)
+    local ms = atlassian_ui.multiselect(items)
+    local ms_actions = atlassian_ui.multiselect_actions(ms)
+
+    Snacks.picker.pick({
+        title = action_name:sub(1, 1):upper() .. action_name:sub(2) .. " Comment (" .. issue_key .. ")",
+        items = items,
+        format = function(item, _picker)
+            local ret = {
+                { item.author .. " ", "Function" },
+                { "(" .. item.time .. "): ", "Comment" },
+                { item.preview, "Normal" },
+            }
+            return atlassian_ui.multiselect_indicator(ret, ms, item)
+        end,
+        confirm = function(picker, item)
+            picker:close()
+            local selected = ms.get_selected(item, "comment")
+            for _, comment in ipairs(selected) do
+                cb(comment)
+            end
+        end,
+        actions = ms_actions,
+        layout = {
+            layout = {
+                box = "vertical",
+                backdrop = false,
+                row = -1,
+                width = 0,
+                height = 0.4,
+                border = "top",
+                title = " {title} {live} {flags}",
+                title_pos = "left",
+                { win = "input", height = 1, border = "bottom" },
+                { win = "list", border = "none" },
+            },
+        },
+        preview = false,
+        win = {
+            input = {
+                keys = atlassian_ui.multiselect_keys,
+            },
+        },
+    })
 end
 
 ---@param issue_key string

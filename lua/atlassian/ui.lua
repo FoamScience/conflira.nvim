@@ -197,4 +197,96 @@ function M.truncate(str, width)
     return str:sub(1, width - 1) .. "…"
 end
 
+-- =============================================================================
+-- Multi-select helpers for Snacks pickers
+-- =============================================================================
+
+--- Create multi-select state for a picker.
+--- Returns a table with selection tracking and helper methods.
+---@param items table[] Picker items (must have `idx` field)
+---@return table multiselect { selected, is_selected, toggle, select_all, select_none, get_selected }
+function M.multiselect(items)
+    local selected = {}
+    return {
+        selected = selected,
+        is_selected = function(item)
+            return selected[item.idx] ~= nil
+        end,
+        toggle = function(item)
+            if selected[item.idx] then
+                selected[item.idx] = nil
+            else
+                selected[item.idx] = true
+            end
+        end,
+        select_all = function()
+            for _, item in ipairs(items) do
+                selected[item.idx] = true
+            end
+        end,
+        select_none = function()
+            for k in pairs(selected) do
+                selected[k] = nil
+            end
+        end,
+        --- Collect selected items. Falls back to current item if nothing toggled.
+        ---@param current_item? table The item under the cursor
+        ---@param key string Field name to extract from each item (e.g. "issue", "page")
+        ---@return table[] Array of extracted values
+        get_selected = function(current_item, key)
+            local result = {}
+            for _, item in ipairs(items) do
+                if selected[item.idx] and item[key] then
+                    table.insert(result, item[key])
+                end
+            end
+            if #result == 0 and current_item and current_item[key] then
+                result = { current_item[key] }
+            end
+            return result
+        end,
+    }
+end
+
+--- Build standard multi-select actions for a Snacks picker.
+---@param ms table Multiselect state from M.multiselect()
+---@return table actions
+function M.multiselect_actions(ms)
+    return {
+        toggle_select = function(picker, item)
+            if item then
+                ms.toggle(item)
+                picker:refresh()
+            end
+        end,
+        select_all = function(picker, _)
+            ms.select_all()
+            picker:refresh()
+        end,
+        select_none = function(picker, _)
+            ms.select_none()
+            picker:refresh()
+        end,
+    }
+end
+
+--- Standard multi-select key bindings.
+---@type table
+M.multiselect_keys = {
+    ["<Tab>"] = { "toggle_select", mode = { "n", "i" }, desc = "Toggle selection" },
+    ["<C-a>"] = { "select_all", mode = { "n", "i" }, desc = "Select all" },
+    ["<C-n>"] = { "select_none", mode = { "n", "i" }, desc = "Select none" },
+}
+
+--- Prepend a selection indicator to a format result table.
+---@param ret table[] Format result (array of {text, hl} pairs)
+---@param ms table Multiselect state
+---@param item table Current item
+---@return table[] The same ret table with indicator prepended
+function M.multiselect_indicator(ret, ms, item)
+    local is_sel = ms.is_selected(item)
+    table.insert(ret, 1, { is_sel and "[x] " or "[ ] ", is_sel and "String" or "Comment" })
+    return ret
+end
+
 return M

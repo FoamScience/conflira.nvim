@@ -41,6 +41,9 @@ function M.show_pages(pages, opts)
         })
     end
 
+    local ms = atlassian_ui.multiselect(items)
+    local ms_actions = atlassian_ui.multiselect_actions(ms)
+
     Snacks.picker.pick({
         title = opts.title or "Confluence Pages",
         items = items,
@@ -53,20 +56,25 @@ function M.show_pages(pages, opts)
             table.insert(ret, { pad_right(item.updated, COL_UPDATED), "Special" })
             table.insert(ret, { " ", "Normal" })
             table.insert(ret, { "v" .. tostring(item.version), "Number" })
-            return ret
+            return atlassian_ui.multiselect_indicator(ret, ms, item)
         end,
         confirm = function(picker, item)
             picker:close()
-            if item and item.page then
+            local selected = ms.get_selected(item, "page")
+            if #selected > 0 then
                 if opts.on_confirm then
-                    opts.on_confirm(item.page)
+                    for _, page in ipairs(selected) do
+                        opts.on_confirm(page)
+                    end
                 else
                     local ui = require("confluence-interface.ui")
-                    ui.view_page(item.page.id)
+                    for _, page in ipairs(selected) do
+                        ui.view_page(page.id)
+                    end
                 end
             end
         end,
-        actions = {
+        actions = vim.tbl_extend("force", ms_actions, {
             edit = function(picker, item)
                 if item and item.page then
                     picker:close()
@@ -75,14 +83,17 @@ function M.show_pages(pages, opts)
                 end
             end,
             copy_url = function(_, item)
-                if item and item.page and item.page.web_url then
+                local selected = ms.get_selected(item, "page")
+                if #selected > 0 then
                     local base_url = config.options.auth.url
                     if not base_url:match("^https?://") then
                         base_url = "https://" .. base_url
                     end
-                    local url = base_url .. "/wiki" .. item.page.web_url
-                    vim.fn.setreg("+", url)
-                    notify.info("Copied: " .. url)
+                    local urls = vim.tbl_map(function(p)
+                        return p.web_url and (base_url .. "/wiki" .. p.web_url) or ""
+                    end, selected)
+                    vim.fn.setreg("+", table.concat(urls, "\n"))
+                    notify.info("Copied " .. #urls .. " URL(s)")
                 end
             end,
             open_browser = function(_, item)
@@ -118,7 +129,7 @@ function M.show_pages(pages, opts)
                     end)
                 end
             end,
-        },
+        }),
         layout = {
             layout = {
                 box = "vertical",
@@ -136,13 +147,13 @@ function M.show_pages(pages, opts)
         preview = false,
         win = {
             input = {
-                keys = {
+                keys = vim.tbl_extend("force", atlassian_ui.multiselect_keys, {
                     ["<C-e>"] = { "edit", mode = { "n", "i" }, desc = "Edit page" },
                     ["<C-y>"] = { "copy_url", mode = { "n", "i" }, desc = "Copy URL" },
                     ["<C-o>"] = { "open_browser", mode = { "n", "i" }, desc = "Open in browser" },
                     ["<C-c>"] = { "children", mode = { "n", "i" }, desc = "Show children" },
                     ["<C-x>"] = { "delete", mode = { "n", "i" }, desc = "Delete page" },
-                },
+                }),
             },
         },
     })
@@ -172,6 +183,9 @@ function M.show_spaces(spaces, opts)
         })
     end
 
+    local ms = atlassian_ui.multiselect(items)
+    local ms_actions = atlassian_ui.multiselect_actions(ms)
+
     Snacks.picker.pick({
         title = opts.title or "Confluence Spaces",
         items = items,
@@ -182,22 +196,25 @@ function M.show_spaces(spaces, opts)
             table.insert(ret, { truncate(item.name, 40), "Function" })
             table.insert(ret, { " ", "Normal" })
             table.insert(ret, { item.space_type, "Comment" })
-            return ret
+            return atlassian_ui.multiselect_indicator(ret, ms, item)
         end,
         confirm = function(picker, item)
             picker:close()
-            if item and item.space then
-                M.pages_in_space(item.space.key)
+            local selected = ms.get_selected(item, "space")
+            for _, space in ipairs(selected) do
+                M.pages_in_space(space.key)
             end
         end,
-        actions = {
+        actions = vim.tbl_extend("force", ms_actions, {
             copy_key = function(_, item)
-                if item and item.space then
-                    vim.fn.setreg("+", item.space.key)
-                    notify.info("Copied: " .. item.space.key)
+                local selected = ms.get_selected(item, "space")
+                if #selected > 0 then
+                    local keys = vim.tbl_map(function(s) return s.key end, selected)
+                    vim.fn.setreg("+", table.concat(keys, "\n"))
+                    notify.info("Copied: " .. table.concat(keys, ", "))
                 end
             end,
-        },
+        }),
         layout = {
             layout = {
                 box = "vertical",
@@ -215,9 +232,9 @@ function M.show_spaces(spaces, opts)
         preview = false,
         win = {
             input = {
-                keys = {
+                keys = vim.tbl_extend("force", atlassian_ui.multiselect_keys, {
                     ["<C-y>"] = { "copy_key", mode = { "n", "i" }, desc = "Copy space key" },
-                },
+                }),
             },
         },
     })
@@ -354,6 +371,9 @@ function M.select_cql_filter()
         })
     end
 
+    local ms = atlassian_ui.multiselect(items)
+    local ms_actions = atlassian_ui.multiselect_actions(ms)
+
     Snacks.picker.pick({
         title = "CQL Filters",
         items = items,
@@ -366,15 +386,16 @@ function M.select_cql_filter()
                 table.insert(ret, { " ", "Normal" })
                 table.insert(ret, { "[" .. item.space_key .. "]", "Special" })
             end
-            return ret
+            return atlassian_ui.multiselect_indicator(ret, ms, item)
         end,
         confirm = function(picker, item)
             picker:close()
-            if item and item.filter then
-                M.search_cql(item.filter.cql)
+            local selected = ms.get_selected(item, "filter")
+            for _, filter in ipairs(selected) do
+                M.search_cql(filter.cql)
             end
         end,
-        actions = {
+        actions = vim.tbl_extend("force", ms_actions, {
             delete_filter = function(picker, item)
                 if item and item.filter then
                     vim.ui.input({ prompt = "Delete filter '" .. item.filter.name .. "'? (yes/no): " }, function(input)
@@ -386,7 +407,7 @@ function M.select_cql_filter()
                     end)
                 end
             end,
-        },
+        }),
         layout = {
             layout = {
                 box = "vertical",
@@ -404,9 +425,9 @@ function M.select_cql_filter()
         preview = false,
         win = {
             input = {
-                keys = {
+                keys = vim.tbl_extend("force", atlassian_ui.multiselect_keys, {
                     ["<C-x>"] = { "delete_filter", mode = { "n", "i" }, desc = "Delete filter" },
-                },
+                }),
             },
         },
     })

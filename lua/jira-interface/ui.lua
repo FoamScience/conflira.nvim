@@ -226,34 +226,76 @@ function M.show_transition_picker(key, current_status)
             return
         end
 
-        local items = {}
-        for _, t in ipairs(transitions) do
+        local Snacks = require("snacks")
+        local atlassian_ui = require("atlassian.ui")
+
+        local picker_items = {}
+        for i, t in ipairs(transitions) do
+            local label
             if current_status then
-                table.insert(items, current_status .. " -> " .. t.to)
+                label = current_status .. " -> " .. t.to
             else
-                table.insert(items, t.name .. " -> " .. t.to)
+                label = t.name .. " -> " .. t.to
             end
+            table.insert(picker_items, {
+                idx = i,
+                text = label,
+                transition = t,
+                label = label,
+            })
         end
 
-        require("snacks").picker.select(items, { prompt = "Select transition:" }, function(choice, idx)
-            if not choice then
-                return
-            end
+        local ms = atlassian_ui.multiselect(picker_items)
+        local ms_actions = atlassian_ui.multiselect_actions(ms)
 
-            local transition = transitions[idx]
-            if api.is_online then
-                api.do_transition(key, transition.id, function(trans_err)
-                    if trans_err then
-                        notify.error("Transition failed: " .. trans_err)
+        Snacks.picker.pick({
+            title = "Transition " .. key,
+            items = picker_items,
+            format = function(item, _picker)
+                local ret = { { item.label, "Normal" } }
+                return atlassian_ui.multiselect_indicator(ret, ms, item)
+            end,
+            confirm = function(picker, item)
+                picker:close()
+                local selected = ms.get_selected(item, "transition")
+                if #selected > 0 then
+                    local t = selected[#selected] -- use last selected transition
+                    if api.is_online then
+                        api.do_transition(key, t.id, function(trans_err)
+                            if trans_err then
+                                notify.error("Transition failed: " .. trans_err)
+                            else
+                                notify.info(string.format("%s -> %s", key, t.to))
+                            end
+                        end)
                     else
-                        notify.info(string.format("%s -> %s", key, transition.to))
+                        local queue = require("jira-interface.queue")
+                        queue.queue_transition(key, t.id, t.to)
                     end
-                end)
-            else
-                local queue = require("jira-interface.queue")
-                queue.queue_transition(key, transition.id, transition.to)
-            end
-        end)
+                end
+            end,
+            actions = ms_actions,
+            layout = {
+                layout = {
+                    box = "vertical",
+                    backdrop = false,
+                    row = -1,
+                    width = 0,
+                    height = 0.3,
+                    border = "top",
+                    title = " {title} {live} {flags}",
+                    title_pos = "left",
+                    { win = "input", height = 1, border = "bottom" },
+                    { win = "list", border = "none" },
+                },
+            },
+            preview = false,
+            win = {
+                input = {
+                    keys = atlassian_ui.multiselect_keys,
+                },
+            },
+        })
     end)
 end
 
@@ -266,47 +308,88 @@ function M.show_assign_picker(key, project)
             return
         end
 
+        local Snacks = require("snacks")
+        local atlassian_ui = require("atlassian.ui")
+
         -- Build display items: Unassign first, then all assignable members
-        local items = { "Unassigned" }
-        for _, m in ipairs(members or {}) do
-            table.insert(items, m.displayName)
+        local items = {}
+        table.insert(items, {
+            idx = 1,
+            text = "Unassigned",
+            display_name = "Unassigned",
+            account_id = nil,
+            member = { displayName = "Unassigned" },
+        })
+        for i, m in ipairs(members or {}) do
+            table.insert(items, {
+                idx = i + 1,
+                text = m.displayName,
+                display_name = m.displayName,
+                account_id = m.accountId,
+                member = m,
+            })
         end
 
-        require("snacks").picker.select(items, { prompt = "Assign " .. key .. " to:" }, function(choice, idx)
-            if not choice then
-                return
-            end
+        local ms = atlassian_ui.multiselect(items)
+        local ms_actions = atlassian_ui.multiselect_actions(ms)
 
-            local account_id
-            if idx == 1 then
-                -- Unassign: Jira expects null accountId
-                account_id = nil
-            else
-                account_id = members[idx - 1].accountId
-            end
+        Snacks.picker.pick({
+            title = "Assign " .. key,
+            items = items,
+            format = function(item, _picker)
+                local ret = { { item.display_name, item.idx == 1 and "Comment" or "Normal" } }
+                return atlassian_ui.multiselect_indicator(ret, ms, item)
+            end,
+            confirm = function(picker, item)
+                picker:close()
+                if not item then return end
+                -- For assign, use the cursor item (multi-select doesn't make sense for assignment)
+                local account_id = item.account_id
+                local choice = item.display_name
 
-            if api.is_online then
-                -- For unassign, Jira Cloud needs accountId: null (vim.NIL encodes as JSON null)
-                local effective_id = account_id or vim.NIL
-                api.assign_issue(key, effective_id, function(assign_err)
-                    if assign_err then
-                        notify.error("Assign failed: " .. assign_err)
-                    else
-                        local msg = idx == 1 and (key .. " unassigned") or (key .. " assigned to " .. choice)
-                        notify.info(msg)
-                        api.get_issue(key, function(fetch_err, fresh_issue)
-                            if not fetch_err and fresh_issue then
-                                M.show_issue(fresh_issue)
-                            end
-                        end)
-                    end
-                end)
-            else
-                local queue = require("jira-interface.queue")
-                local desc = idx == 1 and ("Unassign " .. key) or ("Assign " .. key .. " to " .. choice)
-                queue.queue_update(key, { assignee = { accountId = account_id } }, desc)
-            end
-        end)
+                if api.is_online then
+                    local effective_id = account_id or vim.NIL
+                    api.assign_issue(key, effective_id, function(assign_err)
+                        if assign_err then
+                            notify.error("Assign failed: " .. assign_err)
+                        else
+                            local msg = account_id == nil and (key .. " unassigned") or (key .. " assigned to " .. choice)
+                            notify.info(msg)
+                            api.get_issue(key, function(fetch_err, fresh_issue)
+                                if not fetch_err and fresh_issue then
+                                    M.show_issue(fresh_issue)
+                                end
+                            end)
+                        end
+                    end)
+                else
+                    local queue = require("jira-interface.queue")
+                    local desc = account_id == nil and ("Unassign " .. key) or ("Assign " .. key .. " to " .. choice)
+                    queue.queue_update(key, { assignee = { accountId = account_id } }, desc)
+                end
+            end,
+            actions = ms_actions,
+            layout = {
+                layout = {
+                    box = "vertical",
+                    backdrop = false,
+                    row = -1,
+                    width = 0,
+                    height = 0.3,
+                    border = "top",
+                    title = " {title} {live} {flags}",
+                    title_pos = "left",
+                    { win = "input", height = 1, border = "bottom" },
+                    { win = "list", border = "none" },
+                },
+            },
+            preview = false,
+            win = {
+                input = {
+                    keys = atlassian_ui.multiselect_keys,
+                },
+            },
+        })
     end)
 end
 

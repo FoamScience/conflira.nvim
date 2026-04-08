@@ -20,6 +20,11 @@ function M.run(command_name)
         M.pick_issue()
     elseif command_name == "Status" then
         M.pick_status_color()
+    elseif command_name == "Upload" then
+        local ok, upload = pcall(require, "atlassian.csf.upload")
+        if ok then
+            upload.upload_attachment(vim.api.nvim_get_current_buf())
+        end
     end
 end
 

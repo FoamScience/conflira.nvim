@@ -737,7 +737,7 @@ local function csf_element_to_adf(tag, attrs, children)
                     },
                 }
             elseif child._ri_attachment then
-                local media_attrs = { type = "file", alt = child._ri_attachment }
+                local media_attrs = { type = "file", alt = child._ri_attachment, collection = "" }
                 if child._ri_attachment_id then
                     media_attrs.id = child._ri_attachment_id
                 end

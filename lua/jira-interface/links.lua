@@ -90,12 +90,33 @@ function M.add_link(issue_key)
             table.insert(item_data, { type_name = lt.name, direction = "inward", label = lt.inward })
         end
 
-        require("snacks").picker.select(items, { prompt = "Link type:" }, function(_, idx)
-            if not idx then
-                return
-            end
+        local Snacks = require("snacks")
+        local atlassian_ui = require("atlassian.ui")
 
-            local selected = item_data[idx]
+        local picker_items = {}
+        for i, label in ipairs(items) do
+            table.insert(picker_items, {
+                idx = i,
+                text = label,
+                label = label,
+                data = item_data[i],
+            })
+        end
+
+        local ms = atlassian_ui.multiselect(picker_items)
+        local ms_actions = atlassian_ui.multiselect_actions(ms)
+
+        Snacks.picker.pick({
+            title = "Link Type for " .. issue_key,
+            items = picker_items,
+            format = function(item, _picker)
+                local ret = { { item.label, "Normal" } }
+                return atlassian_ui.multiselect_indicator(ret, ms, item)
+            end,
+            confirm = function(picker, item)
+                picker:close()
+                if not item then return end
+                local selected = item.data
 
             -- Search for target issue: prompt for query, then show picker
             vim.schedule(function()
@@ -140,7 +161,29 @@ function M.add_link(issue_key)
                 })
             end)
             end)
-        end)
+            end,
+            actions = ms_actions,
+            layout = {
+                layout = {
+                    box = "vertical",
+                    backdrop = false,
+                    row = -1,
+                    width = 0,
+                    height = 0.4,
+                    border = "top",
+                    title = " {title} {live} {flags}",
+                    title_pos = "left",
+                    { win = "input", height = 1, border = "bottom" },
+                    { win = "list", border = "none" },
+                },
+            },
+            preview = false,
+            win = {
+                input = {
+                    keys = atlassian_ui.multiselect_keys,
+                },
+            },
+        })
     end)
 end
 
@@ -152,33 +195,81 @@ function M.delete_link(issue_key, links)
         return
     end
 
+    local Snacks = require("snacks")
+    local atlassian_ui = require("atlassian.ui")
+
     local items = {}
-    for _, link in ipairs(links) do
-        table.insert(items, link.label .. " " .. link.issue_key .. ": " .. link.issue_summary)
+    for idx, link in ipairs(links) do
+        table.insert(items, {
+            idx = idx,
+            text = link.label .. " " .. link.issue_key .. ": " .. link.issue_summary,
+            link = link,
+            label = link.label,
+            issue_key = link.issue_key,
+            summary = link.issue_summary,
+        })
     end
 
-    require("snacks").picker.select(items, { prompt = "Select link to delete:" }, function(_, idx)
-        if not idx then
-            return
-        end
+    local ms = atlassian_ui.multiselect(items)
+    local ms_actions = atlassian_ui.multiselect_actions(ms)
 
-        local link = links[idx]
-        vim.ui.input({ prompt = "Delete link '" .. link.label .. " " .. link.issue_key .. "'? [yes/no]: " }, function(input)
-            if not input or input:lower() ~= "yes" then
-                return
-            end
+    Snacks.picker.pick({
+        title = "Delete Links from " .. issue_key,
+        items = items,
+        format = function(item, _picker)
+            local ret = {
+                { item.label .. " ", "Function" },
+                { item.issue_key .. ": ", "Special" },
+                { item.summary, "Normal" },
+            }
+            return atlassian_ui.multiselect_indicator(ret, ms, item)
+        end,
+        confirm = function(picker, item)
+            local selected = ms.get_selected(item, "link")
+            if #selected == 0 then return end
 
-            api.delete_link(link.id, function(err)
-                if err then
-                    notify.error("Failed to delete link: " .. err)
-                else
-                    cache.invalidate_project(config.options.default_project)
-                    notify.info("Link deleted from " .. issue_key)
-                    refresh_issue_view(issue_key)
+            local desc = table.concat(vim.tbl_map(function(l) return l.label .. " " .. l.issue_key end, selected), ", ")
+            vim.ui.input({ prompt = "Delete " .. #selected .. " link(s) (" .. desc .. ")? [yes/no]: " }, function(input)
+                if not input or input:lower() ~= "yes" then return end
+                picker:close()
+                local remaining = #selected
+                for _, link in ipairs(selected) do
+                    api.delete_link(link.id, function(err)
+                        remaining = remaining - 1
+                        if err then
+                            notify.error("Failed to delete link: " .. err)
+                        end
+                        if remaining == 0 then
+                            cache.invalidate_project(config.options.default_project)
+                            notify.info(#selected .. " link(s) deleted from " .. issue_key)
+                            refresh_issue_view(issue_key)
+                        end
+                    end)
                 end
             end)
-        end)
-    end)
+        end,
+        actions = ms_actions,
+        layout = {
+            layout = {
+                box = "vertical",
+                backdrop = false,
+                row = -1,
+                width = 0,
+                height = 0.4,
+                border = "top",
+                title = " {title} {live} {flags}",
+                title_pos = "left",
+                { win = "input", height = 1, border = "bottom" },
+                { win = "list", border = "none" },
+            },
+        },
+        preview = false,
+        win = {
+            input = {
+                keys = atlassian_ui.multiselect_keys,
+            },
+        },
+    })
 end
 
 ---@param issue_key string
