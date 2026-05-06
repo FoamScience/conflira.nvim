@@ -167,7 +167,7 @@ function M.show_workload_picker(project, workload)
             if item and item.issue then
                 picker:close()
                 local ui = require("jira-interface.ui")
-                ui.show_issue(item.issue)
+                ui.show_issue_projected(item.issue)
             end
         end,
         actions = {

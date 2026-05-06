@@ -232,43 +232,65 @@ local function parse_image_ref(line)
     return nil
 end
 
+--- Detect which image backend is available
+---@return "snacks"|"image_nvim"|nil
+local function detect_backend()
+    local ok_snacks, Snacks = pcall(require, "snacks")
+    if ok_snacks and Snacks.image then
+        local snacks_config = Snacks.config or {}
+        local image_config = snacks_config.image or (snacks_config.get and snacks_config.get("image"))
+        if not image_config or image_config.enabled ~= false then
+            return "snacks"
+        end
+    end
+
+    local ok_img = pcall(require, "image")
+    if ok_img then
+        return "image_nvim"
+    end
+
+    return nil
+end
+
 --- Close current hover float
 function M.hover_close()
     if hover then
         if hover.placement then
             pcall(function() hover.placement:close() end)
         end
-        pcall(vim.api.nvim_win_close, hover.win, true)
+        if hover.image_obj then
+            pcall(function() hover.image_obj:clear() end)
+        end
+        if hover.win and vim.api.nvim_win_is_valid(hover.win) then
+            pcall(vim.api.nvim_win_close, hover.win, true)
+        end
         hover = nil
     end
 end
 
---- Show image hover float in top-right corner (like snacks.image for markdown)
+--- Show image hover float in top-right corner
 ---@param path string Local cached image path
 ---@param source_buf number The document buffer
 function M.show_hover(path, source_buf)
-    local ok, Snacks = pcall(require, "snacks")
-    if not ok or not Snacks.image then return end
-
-    -- If already showing this image, keep it
     if hover and hover.src == path then return end
 
     M.hover_close()
 
-    local float_buf = vim.api.nvim_create_buf(false, true)
-    vim.bo[float_buf].bufhidden = "wipe"
+    local backend = detect_backend()
+    if not backend then return end
 
     local max_w = math.min(80, math.floor(vim.o.columns * 0.4))
     local max_h = math.min(40, math.floor(vim.o.lines * 0.5))
 
-    -- Fill with empty lines for image space
+    local float_buf = vim.api.nvim_create_buf(false, true)
+    vim.bo[float_buf].bufhidden = "wipe"
+
     local lines = {}
     for _ = 1, max_h do
         table.insert(lines, "")
     end
     vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, lines)
 
-    -- Position: top-right corner of the editor
     local win = vim.api.nvim_open_win(float_buf, false, {
         relative = "editor",
         width = max_w,
@@ -281,19 +303,36 @@ function M.show_hover(path, source_buf)
         zindex = 50,
     })
 
-    local placement = Snacks.image.placement.new(float_buf, path, {
-        pos = { 1, 0 },
-        inline = true,
-        max_width = max_w,
-        max_height = max_h,
-    })
-
     hover = {
         buf = source_buf,
         win = win,
-        placement = placement,
         src = path,
     }
+
+    if backend == "snacks" then
+        local Snacks = require("snacks")
+        hover.placement = Snacks.image.placement.new(float_buf, path, {
+            pos = { 1, 0 },
+            inline = true,
+            max_width = max_w,
+            max_height = max_h,
+        })
+    elseif backend == "image_nvim" then
+        local image = require("image")
+        local img = image.from_file(path, {
+            window = win,
+            buffer = float_buf,
+            with_virtual_padding = true,
+            x = 0,
+            y = 0,
+            width = max_w,
+            height = max_h,
+        })
+        if img then
+            img:render()
+            hover.image_obj = img
+        end
+    end
 end
 
 --- Attach hover autocmds to a CSF buffer

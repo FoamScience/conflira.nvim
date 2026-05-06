@@ -76,7 +76,7 @@ local function refresh_issue_view(issue_key)
             notify.info("Comment saved for " .. issue_key)
         else
             local ui = require("jira-interface.ui")
-            ui.show_issue(fresh_issue)
+            ui.show_issue_projected(fresh_issue)
         end
     end)
 end

@@ -827,7 +827,7 @@ function M.open_create_buffer(project, issue_type, parent_key, classified, picke
                     end
                     cache.invalidate_project(meta.project)
                     local ui = require("jira-interface.ui")
-                    ui.show_issue(issue)
+                    ui.show_issue_projected(issue)
                 end
             end)
         else

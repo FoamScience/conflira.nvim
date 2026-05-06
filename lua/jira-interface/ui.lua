@@ -9,6 +9,7 @@ local atlassian_ui = require("atlassian.ui")
 local atlassian_format = require("atlassian.format")
 local csf = require("atlassian.csf")
 local bridge = require("atlassian.csf.bridge")
+local editor = require("atlassian.editor")
 
 ---@param opts { width?: number, height?: number, title?: string, mode?: string }
 ---@return number, number Buffer and window IDs
@@ -25,6 +26,291 @@ local function create_window(opts)
         display = display,
         filetype = "csf",
     })
+end
+
+--- Build a composite ADF document from a JiraIssue for the projection engine.
+---@param issue JiraIssue
+---@return table ADF document
+local function build_issue_adf(issue)
+    local content = {}
+
+    -- Title
+    table.insert(content, {
+        type = "heading",
+        attrs = { level = 1 },
+        content = { { type = "text", text = issue.summary or "" } },
+    })
+
+    -- Metadata fields as bold key-value paragraphs
+    local function add_field(label, value)
+        if not value or value == "" then
+            return
+        end
+        table.insert(content, {
+            type = "paragraph",
+            content = {
+                { type = "text", text = label .. ": ", marks = { { type = "strong" } } },
+                { type = "text", text = tostring(value) },
+            },
+        })
+    end
+
+    add_field("Key", issue.key)
+    add_field("Type", issue.type .. " (Level " .. issue.level .. ")")
+
+    local status_info = types.get_status_display(issue.status)
+    add_field("Status", status_info.icon .. " " .. issue.status)
+    add_field("Project", issue.project)
+    add_field("Assignee", issue.assignee or "Unassigned")
+
+    if issue.parent then
+        add_field("Parent", issue.parent)
+    end
+
+    if issue.duedate then
+        local due_display = atlassian_format.format_duedate(issue.duedate)
+            .. " (" .. atlassian_format.format_duedate_relative(issue.duedate) .. ")"
+        add_field("Due", due_display)
+    end
+
+    -- Separator
+    table.insert(content, { type = "rule" })
+
+    -- Description heading
+    table.insert(content, {
+        type = "heading",
+        attrs = { level = 2 },
+        content = { { type = "text", text = "Description" } },
+    })
+
+    -- Description content
+    if issue.description_raw and type(issue.description_raw) == "table" and issue.description_raw.content then
+        for _, node in ipairs(issue.description_raw.content) do
+            table.insert(content, node)
+        end
+    elseif issue.description and issue.description ~= "" then
+        table.insert(content, {
+            type = "paragraph",
+            content = { { type = "text", text = issue.description } },
+        })
+    else
+        table.insert(content, {
+            type = "paragraph",
+            content = { { type = "text", text = "No description", marks = { { type = "em" } } } },
+        })
+    end
+
+    -- Custom field sections
+    for heading, _ in pairs(config.options.custom_fields or {}) do
+        table.insert(content, { type = "rule" })
+        table.insert(content, {
+            type = "heading",
+            attrs = { level = 2 },
+            content = { { type = "text", text = heading } },
+        })
+
+        local raw = (issue.custom_fields_raw or {})[heading]
+        if raw and type(raw) == "table" and raw.content then
+            local adf = vim.deepcopy(raw)
+            for _, node in ipairs(adf.content) do
+                if node.type == "bulletList" then
+                    node.type = "taskList"
+                    for _, item in ipairs(node.content or {}) do
+                        if item.type == "listItem" then
+                            item.type = "taskItem"
+                            item.attrs = item.attrs or {}
+                            item.attrs.state = item.attrs.state or "TODO"
+                        end
+                    end
+                end
+                table.insert(content, node)
+            end
+        elseif raw and type(raw) == "string" and raw ~= "" then
+            table.insert(content, {
+                type = "paragraph",
+                content = { { type = "text", text = raw } },
+            })
+        else
+            table.insert(content, {
+                type = "paragraph",
+                content = { { type = "text", text = "No " .. heading:lower(), marks = { { type = "em" } } } },
+            })
+        end
+    end
+
+    -- Comments
+    if issue.comments and #issue.comments > 0 then
+        table.insert(content, { type = "rule" })
+        table.insert(content, {
+            type = "heading",
+            attrs = { level = 2 },
+            content = { { type = "text", text = "Comments (" .. #issue.comments .. ")" } },
+        })
+
+        for _, comment in ipairs(issue.comments) do
+            local author_text = comment.author_name or "Unknown"
+            local time_text = " · " .. atlassian_format.format_relative_time(comment.created)
+
+            table.insert(content, {
+                type = "paragraph",
+                content = {
+                    { type = "text", text = author_text, marks = { { type = "strong" } } },
+                    { type = "text", text = time_text, marks = { { type = "em" } } },
+                },
+            })
+
+            if comment.body and comment.body.content then
+                for _, node in ipairs(comment.body.content) do
+                    table.insert(content, node)
+                end
+            end
+        end
+    end
+
+    -- Attachments
+    if issue.attachments and #issue.attachments > 0 then
+        table.insert(content, { type = "rule" })
+        table.insert(content, {
+            type = "heading",
+            attrs = { level = 2 },
+            content = { { type = "text", text = "Attachments (" .. #issue.attachments .. ")" } },
+        })
+
+        local items = {}
+        for _, att in ipairs(issue.attachments) do
+            local size = atlassian_format.format_file_size(att.size or 0)
+            table.insert(items, {
+                type = "listItem",
+                content = { {
+                    type = "paragraph",
+                    content = {
+                        { type = "text", text = att.filename, marks = { { type = "link", attrs = { href = att.url } } } },
+                        { type = "text", text = " (" .. size .. ")" },
+                    },
+                } },
+            })
+        end
+        table.insert(content, { type = "bulletList", content = items })
+    end
+
+    -- Footer
+    table.insert(content, { type = "rule" })
+    table.insert(content, {
+        type = "paragraph",
+        content = {
+            { type = "text", text = "URL: ", marks = { { type = "strong" } } },
+            { type = "text", text = issue.web_url, marks = { { type = "link", attrs = { href = issue.web_url } } } },
+        },
+    })
+    table.insert(content, {
+        type = "paragraph",
+        content = { {
+            type = "text",
+            text = "Created: " .. atlassian_format.format_timestamp(issue.created)
+                .. " (" .. atlassian_format.format_relative_time(issue.created) .. ")"
+                .. "  ·  Updated: " .. atlassian_format.format_timestamp(issue.updated)
+                .. " (" .. atlassian_format.format_relative_time(issue.updated) .. ")",
+            marks = { { type = "em" } },
+        } },
+    })
+
+    return { type = "doc", version = 1, content = content }
+end
+
+--- Show an issue using the ADF projection engine.
+---@param issue JiraIssue
+function M.show_issue_projected(issue)
+    local display = vim.tbl_extend("force", config.options.display or {}, {})
+    display.mode = "buffer"
+
+    local buf, win = atlassian_ui.create_window({
+        title = issue.key .. " - " .. issue.summary,
+        bufname = "jira://" .. issue.key,
+        display = display,
+        filetype = "atlassian",
+    })
+
+    local adf = build_issue_adf(issue)
+
+    local eb = editor.open(adf, {
+        type = "jira",
+        key = issue.key,
+        project = issue.project,
+    }, {
+        buf = buf,
+        win = win,
+        modifiable = false,
+    })
+
+    -- Store attachment data for image resolution
+    if issue.attachments and #issue.attachments > 0 then
+        vim.b[buf].atlassian_attachments = issue.attachments
+    end
+
+    -- Keymaps for actions
+    vim.keymap.set("n", "t", function()
+        M.show_transition_picker(issue.key, issue.status)
+    end, { buffer = buf, desc = "Transition status" })
+
+    vim.keymap.set("n", "e", function()
+        M.edit_issue_projected(issue.key)
+    end, { buffer = buf, desc = "Edit issue" })
+
+    vim.keymap.set("n", "s", function()
+        M.show_children(issue.key)
+    end, { buffer = buf, desc = "Show children / sub-tasks" })
+
+    vim.keymap.set("n", "y", function()
+        vim.fn.setreg("+", issue.key)
+        notify.info("Copied: " .. issue.key)
+    end, { buffer = buf, desc = "Copy issue key" })
+
+    vim.keymap.set("n", "Y", function()
+        local url = config.options.auth.url .. "/browse/" .. issue.key
+        vim.fn.setreg("+", url)
+        notify.info("Copied: " .. url)
+    end, { buffer = buf, desc = "Copy issue URL" })
+
+    vim.keymap.set("n", "?", function()
+        vim.cmd("help atlassian-jira-keymaps")
+    end, { buffer = buf, desc = "Show help" })
+
+    local comments_mod = require("jira-interface.comments")
+    vim.keymap.set("n", "c", function()
+        comments_mod.add_comment(issue.key)
+    end, { buffer = buf, desc = "Add comment" })
+
+    vim.keymap.set("n", "C", function()
+        comments_mod.fetch_and_select_comment(issue.key, "edit", function(comment)
+            comments_mod.edit_comment(issue.key, comment)
+        end)
+    end, { buffer = buf, desc = "Edit comment" })
+
+    vim.keymap.set("n", "D", function()
+        comments_mod.fetch_and_select_comment(issue.key, "delete", function(comment)
+            comments_mod.delete_comment(issue.key, comment)
+        end)
+    end, { buffer = buf, desc = "Delete comment" })
+
+    local links_mod = require("jira-interface.links")
+    vim.keymap.set("n", "L", function()
+        links_mod.add_link(issue.key)
+    end, { buffer = buf, desc = "Add issue link" })
+
+    vim.keymap.set("n", "X", function()
+        links_mod.fetch_and_delete_link(issue.key)
+    end, { buffer = buf, desc = "Delete issue link" })
+
+    vim.keymap.set("n", "a", function()
+        M.show_assign_picker(issue.key, issue.project)
+    end, { buffer = buf, desc = "Assign issue" })
+
+    vim.keymap.set("n", "n", function()
+        local picker = require("jira-interface.picker")
+        picker.create_issue(nil, issue.project, issue.key)
+    end, { buffer = buf, desc = "Create child issue" })
+
+    atlassian_ui.setup_view_keymaps(buf)
 end
 
 ---@param issue JiraIssue
@@ -144,7 +430,7 @@ function M.show_issue(issue)
     end, { buffer = buf, desc = "Transition status" })
 
     vim.keymap.set("n", "e", function()
-        M.edit_issue(issue.key)
+        M.edit_issue_projected(issue.key)
     end, { buffer = buf, desc = "Edit issue" })
 
     vim.keymap.set("n", "s", function()
@@ -209,7 +495,7 @@ function M.view(key)
             notify.error("Failed to fetch issue: " .. err)
             return
         end
-        M.show_issue(issue)
+        M.show_issue_projected(issue)
     end)
 end
 
@@ -357,7 +643,7 @@ function M.show_assign_picker(key, project)
                             notify.info(msg)
                             api.get_issue(key, function(fetch_err, fresh_issue)
                                 if not fetch_err and fresh_issue then
-                                    M.show_issue(fresh_issue)
+                                    M.show_issue_projected(fresh_issue)
                                 end
                             end)
                         end
@@ -390,6 +676,229 @@ function M.show_assign_picker(key, project)
                 },
             },
         })
+    end)
+end
+
+--- Build an editable ADF document from a JiraIssue (summary + description + custom fields only).
+---@param issue JiraIssue
+---@return table ADF document
+---@return table section_map Maps ADF content indices to field names
+local function build_edit_adf(issue)
+    local content = {}
+    local section_map = {} -- { [start_idx] = { field = "summary"|"description"|field_id, end_idx = N } }
+
+    -- Summary as h1 (editable)
+    table.insert(content, {
+        type = "heading",
+        attrs = { level = 1 },
+        content = { { type = "text", text = issue.summary or "" } },
+    })
+    section_map[#content] = { field = "summary" }
+
+    -- Description section
+    table.insert(content, {
+        type = "heading",
+        attrs = { level = 2 },
+        content = { { type = "text", text = "Description" } },
+    })
+    local desc_start = #content + 1
+
+    if issue.description_raw and type(issue.description_raw) == "table" and issue.description_raw.content then
+        for _, node in ipairs(issue.description_raw.content) do
+            table.insert(content, node)
+        end
+    elseif issue.description and issue.description ~= "" then
+        table.insert(content, {
+            type = "paragraph",
+            content = { { type = "text", text = issue.description } },
+        })
+    else
+        table.insert(content, {
+            type = "paragraph",
+            content = { { type = "text", text = "" } },
+        })
+    end
+    section_map[desc_start] = { field = "description", end_idx = #content }
+
+    -- Custom field sections
+    for heading, _ in pairs(config.options.custom_fields or {}) do
+        table.insert(content, { type = "rule" })
+        table.insert(content, {
+            type = "heading",
+            attrs = { level = 2 },
+            content = { { type = "text", text = heading } },
+        })
+        local field_start = #content + 1
+
+        local raw = (issue.custom_fields_raw or {})[heading]
+        if raw and type(raw) == "table" and raw.content then
+            local adf_copy = vim.deepcopy(raw)
+            for _, node in ipairs(adf_copy.content) do
+                if node.type == "bulletList" then
+                    node.type = "taskList"
+                    for _, item in ipairs(node.content or {}) do
+                        if item.type == "listItem" then
+                            item.type = "taskItem"
+                            item.attrs = item.attrs or {}
+                            item.attrs.state = item.attrs.state or "TODO"
+                        end
+                    end
+                end
+                table.insert(content, node)
+            end
+        elseif raw and type(raw) == "string" and raw ~= "" then
+            table.insert(content, {
+                type = "paragraph",
+                content = { { type = "text", text = raw } },
+            })
+        else
+            table.insert(content, {
+                type = "paragraph",
+                content = { { type = "text", text = "" } },
+            })
+        end
+
+        local resolved_ids = (issue.custom_fields_raw or {})._resolved_ids or {}
+        local field_id = resolved_ids[heading]
+        if not field_id then
+            local ref = (config.options.custom_fields or {})[heading]
+            field_id = type(ref) == "table" and ref[1] or ref
+        end
+        if field_id then
+            section_map[field_start] = { field = field_id, end_idx = #content }
+        end
+    end
+
+    return { type = "doc", version = 1, content = content }, section_map
+end
+
+--- Extract only CHANGED fields from the edited ADF tree using the section map.
+---@param adf table Current ADF document
+---@param adf_snapshot table Original ADF snapshot
+---@param section_map table
+---@param original_issue JiraIssue
+---@return table fields Map of field name/id → ADF value (only changed fields)
+local function extract_edit_fields(adf, adf_snapshot, section_map, original_issue)
+    local fields = {}
+    local content = adf.content or {}
+    local orig_content = adf_snapshot.content or {}
+
+    for start_idx, section in pairs(section_map) do
+        if section.field == "summary" then
+            local node = content[start_idx]
+            if node and node.content then
+                local texts = {}
+                for _, child in ipairs(node.content) do
+                    if child.type == "text" then
+                        texts[#texts + 1] = child.text or ""
+                    end
+                end
+                local new_summary = table.concat(texts)
+                if new_summary ~= original_issue.summary then
+                    fields.summary = new_summary
+                end
+            end
+        else
+            local end_idx = section.end_idx or start_idx
+            local section_content = {}
+            local orig_section_content = {}
+            for i = start_idx, end_idx do
+                if content[i] then
+                    table.insert(section_content, content[i])
+                end
+                if orig_content[i] then
+                    table.insert(orig_section_content, orig_content[i])
+                end
+            end
+
+            -- Only send if content actually changed
+            local new_json = vim.json.encode(section_content)
+            local orig_json = vim.json.encode(orig_section_content)
+            if new_json ~= orig_json then
+                local section_adf = { type = "doc", version = 1, content = section_content }
+                fields[section.field] = bridge.sanitize_for_jira(section_adf)
+            end
+        end
+    end
+
+    return fields
+end
+
+---@param key string
+function M.edit_issue_projected(key)
+    api.get_issue(key, function(err, issue)
+        if err then
+            notify.error("Failed to fetch issue: " .. err)
+            return
+        end
+
+        local display = vim.tbl_extend("force", config.options.display or {}, {})
+        display.mode = "buffer"
+
+        local buf, win = atlassian_ui.create_window({
+            title = "Edit " .. key,
+            bufname = "jira://" .. key .. "/edit",
+            display = display,
+            filetype = "atlassian",
+        })
+
+        local edit_adf, section_map = build_edit_adf(issue)
+
+        local eb = editor.open(edit_adf, {
+            type = "jira",
+            key = key,
+            project = issue.project,
+            issue_type = issue.type,
+        }, {
+            buf = buf,
+            win = win,
+            modifiable = true,
+        })
+
+        if issue.attachments and #issue.attachments > 0 then
+            vim.b[buf].atlassian_attachments = issue.attachments
+        end
+
+        local function do_submit()
+            local fields = extract_edit_fields(eb.adf, eb.adf_snapshot, section_map, issue)
+
+            if vim.tbl_isempty(fields) then
+                notify.info("No changes to save")
+                return
+            end
+
+            if api.is_online then
+                api.update_issue(key, fields, function(update_err)
+                    if update_err then
+                        notify.error(notify.format_api_error(update_err, "updating " .. key))
+                    else
+                        local draft_mod = require("atlassian.editor.draft")
+                        draft_mod.mark_clean(eb)
+
+                        if vim.api.nvim_buf_is_valid(buf) then
+                            vim.api.nvim_buf_delete(buf, { force = true })
+                        end
+                        cache.invalidate_project(issue.project)
+                        api.get_issue(key, function(fetch_err, fresh_issue)
+                            if fetch_err then
+                                notify.info("Issue updated: " .. key)
+                            else
+                                notify.info("Issue updated: " .. key)
+                                M.show_issue_projected(fresh_issue)
+                            end
+                        end)
+                    end
+                end)
+            else
+                local queue = require("jira-interface.queue")
+                queue.queue_update(key, fields, "Update " .. key)
+                if vim.api.nvim_buf_is_valid(buf) then
+                    vim.api.nvim_buf_delete(buf, { force = true })
+                end
+            end
+        end
+
+        require("atlassian.submit").register(buf, { submit = do_submit, label = "Jira Issue" })
     end)
 end
 
@@ -526,7 +1035,7 @@ function M.edit_issue(key)
                                 notify.info("Issue updated: " .. key)
                             else
                                 notify.info("Issue updated: " .. key)
-                                M.show_issue(fresh_issue)
+                                M.show_issue_projected(fresh_issue)
                             end
                         end)
                     end

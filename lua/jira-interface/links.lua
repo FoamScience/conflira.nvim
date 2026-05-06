@@ -25,7 +25,7 @@ local function refresh_issue_view(issue_key)
         else
             wipe_issue_buf(issue_key)
             local ui = require("jira-interface.ui")
-            ui.show_issue(fresh_issue)
+            ui.show_issue_projected(fresh_issue)
         end
     end)
 end
