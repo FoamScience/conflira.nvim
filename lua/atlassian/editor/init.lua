@@ -84,21 +84,60 @@ function M.open(adf, metadata, opts)
 	end
 
 	if opts.modifiable then
-		-- Editable mode: attach sync + draft tracking
+		-- Editable mode: attach sync + draft + keymaps
 		vim.bo[buf].modifiable = true
 		vim.bo[buf].buftype = "acwrite"
 		sync.attach(eb)
 		draft.attach(eb)
+		keymap.attach(eb)
+		md_input.attach(eb)
 	else
 		vim.bo[buf].modifiable = false
 	end
 
 	M.buffers[buf] = eb
 
-	-- Image hover support
-	if result.image_refs and next(result.image_refs) then
-		M.setup_image_hover(buf, eb)
+	local function open_link_at_cursor()
+		local row = vim.api.nvim_win_get_cursor(0)[1] - 1
+		local col = vim.api.nvim_win_get_cursor(0)[2]
+		local refs = eb.render_result and eb.render_result.link_refs and eb.render_result.link_refs[row]
+		if refs then
+			local best, best_dist
+			for _, ref in ipairs(refs) do
+				local dist = 0
+				if col < ref.col_start then
+					dist = ref.col_start - col
+				elseif col >= ref.col_end then
+					dist = col - ref.col_end + 1
+				end
+				if not best_dist or dist < best_dist then
+					best = ref
+					best_dist = dist
+				end
+			end
+			if best then
+				vim.ui.open(best.href)
+				return
+			end
+		end
+		local img_ref = eb.render_result and eb.render_result.image_refs and eb.render_result.image_refs[row]
+		if img_ref and img_ref.url then
+			vim.ui.open(img_ref.url)
+			return
+		end
+		vim.notify("No link at cursor", vim.log.levels.INFO)
 	end
+
+	-- Prevent K from triggering :Man
+	vim.bo[buf].keywordprg = ""
+
+	-- gx / gf: open link at cursor
+	vim.keymap.set("n", "gx", open_link_at_cursor, { buffer = buf, desc = "Open link at cursor" })
+	vim.keymap.set("n", "gf", open_link_at_cursor, { buffer = buf, desc = "Open link at cursor" })
+
+	-- Image hover + PDF preview support
+	M.setup_image_hover(buf, eb)
+	M.setup_preview_keymap(buf, eb)
 
 	-- Cleanup on buffer wipe
 	vim.api.nvim_create_autocmd("BufWipeout", {
@@ -151,7 +190,7 @@ end
 ---@param buf number
 ---@param eb EditorBuffer
 function M.setup_image_hover(buf, eb)
-	local image = require("atlassian.csf.image")
+	local image = require("atlassian.image")
 	local group = vim.api.nvim_create_augroup("atlas_editor_image_" .. buf, { clear = true })
 
 	local function get_image_ref_at_cursor()
@@ -203,11 +242,14 @@ function M.setup_image_hover(buf, eb)
 		callback = function()
 			if vim.fn.mode() ~= "n" then return end
 			local ref, row = get_image_ref_at_cursor()
-			if not ref then
-				image.hover_close()
+			if ref then
+				fetch_and_show(ref, row)
 				return
 			end
-			fetch_and_show(ref, row)
+			-- Keep hover open on link ref lines (PDF previews)
+			local link_refs = eb.render_result and eb.render_result.link_refs and eb.render_result.link_refs[row]
+			if link_refs then return end
+			image.hover_close()
 		end,
 	})
 
@@ -216,9 +258,11 @@ function M.setup_image_hover(buf, eb)
 		buffer = buf,
 		callback = function()
 			local ref = get_image_ref_at_cursor()
-			if not ref then
-				image.hover_close()
-			end
+			if ref then return end
+			local row = vim.api.nvim_win_get_cursor(0)[1] - 1
+			local link_refs = eb.render_result and eb.render_result.link_refs and eb.render_result.link_refs[row]
+			if link_refs then return end
+			image.hover_close()
 		end,
 	})
 
@@ -230,15 +274,103 @@ function M.setup_image_hover(buf, eb)
 		end,
 	})
 
+end
+
+--- K keymap: preview images and PDF attachments
+---@param buf number
+---@param eb EditorBuffer
+function M.setup_preview_keymap(buf, eb)
+	local image = require("atlassian.image")
+
 	vim.keymap.set("n", "K", function()
-		local ref, row = get_image_ref_at_cursor()
-		if not ref then
-			vim.notify("No image at cursor", vim.log.levels.INFO)
+		local row = vim.api.nvim_win_get_cursor(0)[1] - 1
+		local col = vim.api.nvim_win_get_cursor(0)[2]
+
+		-- Check image refs first
+		local img_ref = eb.render_result and eb.render_result.image_refs and eb.render_result.image_refs[row]
+		if img_ref then
+			vim.notify("Fetching image...", vim.log.levels.INFO)
+			local meta = eb.metadata
+			if img_ref.url then
+				image.fetch_url(img_ref.url, function(err, path)
+					if err or not path then return end
+					if not vim.api.nvim_buf_is_valid(buf) then return end
+					image.show_hover(path, buf)
+				end)
+			elseif img_ref.filename or img_ref.id then
+				local id_or_name = img_ref.filename or img_ref.id
+				if meta.type == "jira" then
+					image.fetch_jira_attachment(buf, id_or_name, function(err, path)
+						if err or not path then return end
+						if not vim.api.nvim_buf_is_valid(buf) then return end
+						image.show_hover(path, buf)
+					end)
+				elseif meta.type == "confluence" and meta.id then
+					image.fetch_confluence_attachment(meta.id, id_or_name, function(err, path)
+						if err or not path then return end
+						if not vim.api.nvim_buf_is_valid(buf) then return end
+						image.show_hover(path, buf)
+					end)
+				end
+			end
 			return
 		end
-		vim.notify("Fetching image...", vim.log.levels.INFO)
-		fetch_and_show(ref, row)
-	end, { buffer = buf, desc = "Show image at cursor" })
+
+		-- Check link refs for PDF attachments
+		local link_refs = eb.render_result and eb.render_result.link_refs and eb.render_result.link_refs[row]
+		if link_refs then
+			local best, best_dist
+			for _, ref in ipairs(link_refs) do
+				local dist = 0
+				if col < ref.col_start then
+					dist = ref.col_start - col
+				elseif col >= ref.col_end then
+					dist = col - ref.col_end + 1
+				end
+				if not best_dist or dist < best_dist then
+					best = ref
+					best_dist = dist
+				end
+			end
+
+			if best and best.href then
+				-- Extract filename from the line text to check extension
+				local line_text = vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or ""
+				local link_text = line_text:sub(best.col_start + 1, best.col_end)
+
+				if image.is_pdf_filename(link_text) or best.href:lower():match("%.pdf") then
+					vim.notify("Fetching PDF preview...", vim.log.levels.INFO)
+					local meta = eb.metadata
+					local auth = nil
+					if meta.type == "jira" then
+						local ok, jc = pcall(require, "jira-interface.config")
+						if ok then auth = jc.options.auth end
+					elseif meta.type == "confluence" then
+						local ok, cc = pcall(require, "confluence-interface.config")
+						if ok then auth = cc.options.auth end
+					end
+
+					image.download_file(best.href, auth, function(err, pdf_path)
+						if err or not pdf_path then
+							vim.notify("PDF download failed: " .. (err or ""), vim.log.levels.ERROR)
+							return
+						end
+						image.convert_pdf_to_png(pdf_path, function(conv_err, png_path)
+							if conv_err or not png_path then
+								vim.notify("PDF convert failed: " .. (conv_err or ""), vim.log.levels.ERROR)
+								return
+							end
+							if not vim.api.nvim_buf_is_valid(buf) then return end
+							image.show_hover(png_path, buf)
+						end)
+					end, { ext = "pdf" })
+					return
+				end
+			end
+		end
+
+		vim.notify("No previewable content at cursor", vim.log.levels.INFO)
+	end, { buffer = buf, desc = "Preview image/PDF at cursor" })
 end
 
 ---@param adf table ADF node path

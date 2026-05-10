@@ -8,6 +8,7 @@ M.ui = require("atlassian.ui")
 M.cache = require("atlassian.cache")
 M.format = require("atlassian.format")
 M.adf = require("atlassian.adf")
-M.csf = require("atlassian.csf")
+M.image = require("atlassian.image")
+M.editor = require("atlassian.editor")
 
 return M

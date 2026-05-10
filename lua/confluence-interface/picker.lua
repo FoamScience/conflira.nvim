@@ -79,7 +79,7 @@ function M.show_pages(pages, opts)
                 if item and item.page then
                     picker:close()
                     local ui = require("confluence-interface.ui")
-                    ui.edit_page(item.page.id)
+                    ui.edit_page_projected(item.page.id)
                 end
             end,
             copy_url = function(_, item)
@@ -319,7 +319,7 @@ function M.search_edit(query, space_key)
     M.search(query, space_key, {
         on_confirm = function(page)
             local ui = require("confluence-interface.ui")
-            ui.edit_page(page.id)
+            ui.edit_page_projected(page.id)
         end,
     })
 end

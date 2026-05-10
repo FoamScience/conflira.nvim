@@ -41,70 +41,11 @@ function M.create_commands()
         picker.search_all()
     end, { desc = "Search Jira issues" })
 
+    -- JiraMe is an alias for JiraBoard
     cmd("JiraMe", function()
-        local picker = require("jira-interface.picker")
-        picker.assigned_to_me()
-    end, { desc = "Show issues assigned to me" })
-
-    cmd("JiraCreatedByMe", function()
-        local picker = require("jira-interface.picker")
-        picker.created_by_me()
-    end, { desc = "Show issues created by me" })
-
-    cmd("JiraAssignedNotCreated", function()
-        local picker = require("jira-interface.picker")
-        picker.assigned_not_created()
-    end, { desc = "Show issues assigned to me but created by others" })
-
-    cmd("JiraProject", function(args)
-        local picker = require("jira-interface.picker")
-        if args.args and args.args ~= "" then
-            picker.by_project(args.args)
-        else
-            picker.select_project()
-        end
-    end, { nargs = "?", desc = "Filter by project" })
-
-    -- Hierarchy commands
-    cmd("JiraEpics", function()
-        local picker = require("jira-interface.picker")
-        picker.by_level(1)
-    end, { desc = "Show Epics (Level 1)" })
-
-    cmd("JiraFeatures", function()
-        local picker = require("jira-interface.picker")
-        picker.by_level(2)
-    end, { desc = "Show Features/Bugs/Issues (Level 2)" })
-
-    cmd("JiraTasks", function()
-        local picker = require("jira-interface.picker")
-        picker.by_level(3)
-    end, { desc = "Show Tasks (Level 3)" })
-
-    -- Due date commands
-    cmd("JiraDue", function(args)
-        local picker = require("jira-interface.picker")
-        local subcommand = args.args or ""
-
-        if subcommand == "overdue" then
-            picker.due_overdue()
-        elseif subcommand == "today" then
-            picker.due_today()
-        elseif subcommand == "week" then
-            picker.due_this_week()
-        elseif subcommand == "soon" then
-            picker.due_soon()
-        else
-            -- Default: show all with due dates sorted
-            picker.by_duedate()
-        end
-    end, {
-        nargs = "?",
-        desc = "Filter by due date (overdue|today|week|soon)",
-        complete = function()
-            return { "overdue", "today", "week", "soon" }
-        end,
-    })
+        local outline_board = require("atlassian.board")
+        outline_board.open()
+    end, { desc = "Open board (alias for :JiraBoard)" })
 
     -- Issue commands
     cmd("JiraView", function(args)
@@ -177,7 +118,7 @@ function M.create_commands()
         local context = require("jira-interface.context")
         local ui = require("jira-interface.ui")
         context.resolve_issue_key_or_pick(args.args, function(key)
-            ui.edit_issue(key)
+            ui.edit_issue_projected(key)
         end)
     end, { nargs = "?", desc = "Edit issue" })
 
@@ -414,25 +355,12 @@ function M.create_commands()
         end)
     end, { desc = "Sync offline edits" })
 
-    -- Team dashboard
-    cmd("JiraTeam", function(args)
-        local team = require("jira-interface.team")
-        local project = args.args ~= "" and args.args or nil
-        team.show_team_dashboard(project)
-    end, { nargs = "?", desc = "Show team workload dashboard" })
-
-    -- Board commands
+    -- Board (single entry point for all views)
     cmd("JiraBoard", function(args)
-        local board = require("jira-interface.board")
-        local board_id = args.args ~= "" and tonumber(args.args) or nil
-        board.show_board(board_id)
-    end, { nargs = "?", desc = "Show Kanban board view" })
-
-    cmd("JiraSprint", function(args)
-        local board = require("jira-interface.board")
-        local board_id = args.args ~= "" and tonumber(args.args) or nil
-        board.show_sprint(board_id)
-    end, { nargs = "?", desc = "Show sprint board view" })
+        local outline_board = require("atlassian.board")
+        local project = args.args ~= "" and args.args or nil
+        outline_board.open({ project = project })
+    end, { nargs = "?", desc = "Open board. Use gq to switch queries, g{s,a,p,i,d,t} to group." })
 
     -- TODO to Issue conversion
     cmd("JiraTodoToIssue", function(args)

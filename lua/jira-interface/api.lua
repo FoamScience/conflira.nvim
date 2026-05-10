@@ -52,7 +52,7 @@ local function build_fields_param()
     local field_list = {
         "summary", "description", "status", "issuetype", "project",
         "assignee", "parent", "attachment", "comment", "issuelinks",
-        "duedate", "created", "updated",
+        "priority", "duedate", "created", "updated",
     }
     for _, value in pairs(config.options.custom_fields or {}) do
         if type(value) == "table" then
@@ -84,7 +84,7 @@ end
 --- If custom_fields is empty, auto-discovers rich text custom fields.
 --- Runs once per session; subsequent calls invoke the callback immediately.
 ---@param callback fun()
-local function ensure_custom_fields_resolved(callback)
+function M.ensure_custom_fields_resolved(callback)
     if _fields_resolved then
         callback()
         return
@@ -150,7 +150,7 @@ end
 ---@param jql string
 ---@param callback fun(err: string|nil, issues: JiraIssue[]|nil)
 function M.search(jql, callback)
-    ensure_custom_fields_resolved(function()
+    M.ensure_custom_fields_resolved(function()
         local since = config.options.since
         if since and since ~= "" then
             local order_by = jql:match("(ORDER%s+BY%s+.+)$")
@@ -187,7 +187,7 @@ end
 ---@param key string
 ---@param callback fun(err: string|nil, issue: JiraIssue|nil)
 function M.get_issue(key, callback)
-    ensure_custom_fields_resolved(function()
+    M.ensure_custom_fields_resolved(function()
         M.request("/issue/" .. key .. "?" .. build_fields_param(), "GET", nil, function(err, data)
             if err then
                 callback(err, nil)

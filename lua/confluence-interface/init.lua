@@ -110,7 +110,7 @@ function M.create_commands()
             return
         end
         local ui = require("confluence-interface.ui")
-        ui.edit_page(args.args)
+        ui.edit_page_projected(args.args)
     end, { nargs = "?", desc = "Edit page by ID" })
 
     cmd("ConfluenceCreate", function(args)

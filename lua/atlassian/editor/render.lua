@@ -31,6 +31,7 @@ local function ctx_new()
 		spans = {},
 		line_to_node = {},
 		image_refs = {},
+		link_refs = {},
 		line = 0,
 		indent = 0,
 	}
@@ -116,6 +117,16 @@ local function render_inline(ctx, nodes, base_line, base_col, path)
 						ctx_add_mark(ctx, base_line, col, {
 							end_col = col + text_len,
 							hl_group = hl,
+						})
+					end
+					if mark.type == "link" and mark.attrs and mark.attrs.href then
+						if not ctx.link_refs[base_line] then
+							ctx.link_refs[base_line] = {}
+						end
+						table.insert(ctx.link_refs[base_line], {
+							col_start = col,
+							col_end = col + text_len,
+							href = mark.attrs.href,
 						})
 					end
 				end
@@ -260,6 +271,16 @@ local function render_inline_wrapped(ctx, nodes, first_line, break_offsets, wrap
 							ctx_add_mark(ctx, buf_line, col_start, {
 								end_col = col_end,
 								hl_group = hl,
+							})
+						end
+						if mark.type == "link" and mark.attrs and mark.attrs.href then
+							if not ctx.link_refs[buf_line] then
+								ctx.link_refs[buf_line] = {}
+							end
+							table.insert(ctx.link_refs[buf_line], {
+								col_start = col_start,
+								col_end = col_end,
+								href = mark.attrs.href,
 							})
 						end
 					end
@@ -617,8 +638,8 @@ local function render_table(ctx, node, path)
 	end
 
 	-- First pass: compute column widths and collect cell texts
-	local grid = {} -- grid[row][col] = { text, is_header, path }
-	local col_widths = {}
+	local grid = {} -- grid[row][col] = { text, is_header, path, dw }
+	local col_widths = {} -- display widths
 
 	for ri, row in ipairs(rows) do
 		grid[ri] = {}
@@ -632,44 +653,42 @@ local function render_table(ctx, node, path)
 			end
 			local cell_text = table.concat(text_parts)
 			local is_header = cell.type == "tableHeader"
+			local dw = vim.fn.strdisplaywidth(cell_text)
 
 			grid[ri][ci] = {
 				text = cell_text,
 				is_header = is_header,
 				cell_node = cell,
 				cell_path = path_append(path_append(path, ri), ci),
+				dw = dw,
 			}
-			col_widths[ci] = math.max(col_widths[ci] or 0, #cell_text)
+			col_widths[ci] = math.max(col_widths[ci] or 0, dw)
 		end
 	end
 
 	local num_cols = #col_widths
 	for i = 1, num_cols do
-		col_widths[i] = math.max(col_widths[i], 3) -- minimum 3 chars
+		col_widths[i] = math.max(col_widths[i], 3) -- minimum 3 display chars
 	end
 
-	-- Build border strings
-	local function make_border(left, mid, right, fill)
-		local parts = { left }
+	-- Build border to mirror data row exactly:
+	-- Data: " cell1 " .. " │ " .. " cell2 "
+	-- Border: "─cell1─" .. "─┼─" .. "─cell2─"  (same display widths)
+	local function make_border(mid)
+		local segments = {}
 		for ci = 1, num_cols do
-			parts[#parts + 1] = string.rep(fill, col_widths[ci] + 2)
-			if ci < num_cols then
-				parts[#parts + 1] = mid
-			end
+			segments[#segments + 1] = string.rep("─", col_widths[ci] + 2)
 		end
-		parts[#parts + 1] = right
-		return table.concat(parts)
+		return table.concat(segments, "─" .. mid .. "─")
 	end
 
-	local top_border = make_border("┌", "┬", "┐", "─")
-	local mid_border = make_border("├", "┼", "┤", "─")
-	local bot_border = make_border("└", "┴", "┘", "─")
+	local top_border = make_border("┬")
+	local mid_border = make_border("┼")
+	local bot_border = make_border("┴")
 
 	-- Render rows
 	for ri, row_data in ipairs(grid) do
-		local line = ctx_line(ctx)
-
-		-- Top border or mid border
+		-- Top border or mid border as real buffer line
 		local border
 		if ri == 1 then
 			border = top_border
@@ -682,73 +701,79 @@ local function render_table(ctx, node, path)
 		end
 
 		if border then
-			ctx_add_mark(ctx, line, 0, {
-				virt_lines_above = true,
-				virt_lines = { { { border, "AtlasTableBorder" } } },
+			local bline = ctx_line(ctx)
+			ctx_append_line(ctx, border)
+			ctx_add_mark(ctx, bline, 0, {
+				end_col = #border,
+				hl_group = "AtlasTableBorder",
 			})
 		end
 
-		-- Build row text: " cell1 │ cell2 │ cell3 "
-		local parts = {}
-		local col_offset = 0
-		for ci, cell_data in ipairs(row_data) do
-			local padded = cell_data.text .. string.rep(" ", col_widths[ci] - #cell_data.text)
-			if ci == 1 then
-				parts[#parts + 1] = " " .. padded .. " "
-			else
-				parts[#parts + 1] = " " .. padded .. " "
-			end
+		local line = ctx_line(ctx)
 
-			-- Track span for this cell
-			local span_start = col_offset
-			if ci > 1 then
-				span_start = col_offset -- after the delimiter
-			end
-			local cell_text_start = span_start + 1 -- after leading space
-			local cell_text_end = cell_text_start + #cell_data.text
+		-- Build row text: " cell1 │ cell2 │ cell3 "
+		-- Pad uses display width; byte offsets tracked separately for extmarks
+		local parts = {}
+		local byte_offsets = {} -- byte_offsets[ci] = { part_start, text_start, text_end }
+		local byte_pos = 0
+		local del_str = " │ "
+		local del_byte_len = #del_str
+
+		for ci, cell_data in ipairs(row_data) do
+			local pad_count = col_widths[ci] - cell_data.dw
+			local padded = cell_data.text .. string.rep(" ", pad_count)
+			local part = " " .. padded .. " "
+			parts[#parts + 1] = part
+
+			local text_start = byte_pos + 1 -- after leading space
+			local text_end = text_start + #cell_data.text
+
+			byte_offsets[ci] = { part_start = byte_pos, text_start = text_start, text_end = text_end }
 
 			ctx_add_span(ctx, {
 				line = line,
-				col_start = cell_text_start,
-				col_end = cell_text_end,
+				col_start = text_start,
+				col_end = text_end,
 				path = cell_data.cell_path,
 				field = "text",
 				editable = true,
 			})
 
 			if cell_data.is_header then
-				ctx_add_mark(ctx, line, cell_text_start, {
-					end_col = cell_text_end,
+				ctx_add_mark(ctx, line, text_start, {
+					end_col = text_end,
 					hl_group = "AtlasTableHeader",
 				})
 			end
 
-			col_offset = col_offset + #parts[#parts]
+			byte_pos = byte_pos + #part
 			if ci < num_cols then
-				col_offset = col_offset + 3 -- " │ "
+				byte_pos = byte_pos + del_byte_len
 			end
 		end
 
-		local row_text = table.concat(parts, " │ ")
+		local row_text = table.concat(parts, del_str)
 		ctx_map_line(ctx, line, rows[ri])
 		ctx_append_line(ctx, row_text)
 
 		-- Highlight delimiters
-		local pos = 0
+		local del_pos = 0
 		for ci = 1, num_cols - 1 do
-			pos = pos + #parts[ci]
-			local del_start = pos + 1 -- space before │
-			ctx_add_mark(ctx, line, del_start, {
-				end_col = del_start + 3,
+			del_pos = del_pos + #parts[ci]
+			ctx_add_mark(ctx, line, del_pos, {
+				end_col = del_pos + del_byte_len,
 				hl_group = "AtlasTableDelimiter",
 			})
-			pos = pos + 3
+			del_pos = del_pos + del_byte_len
 		end
 
 		-- Bottom border after last row
 		if ri == #grid then
-			ctx_add_mark(ctx, line, 0, {
-				virt_lines = { { { bot_border, "AtlasTableBorder" } } },
+			local bline = ctx_line(ctx)
+			ctx_append_line(ctx, bot_border)
+			ctx_add_mark(ctx, bline, 0, {
+				end_col = #bot_border,
+				hl_group = "AtlasTableBorder",
 			})
 		end
 	end
@@ -888,6 +913,7 @@ function M.render(adf)
 		spans = ctx.spans,
 		line_to_node = ctx.line_to_node,
 		image_refs = ctx.image_refs,
+		link_refs = ctx.link_refs,
 	}
 end
 

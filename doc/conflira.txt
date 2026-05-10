@@ -18,20 +18,21 @@ CONTENTS                                             *atlassian-contents*
 1. INTRODUCTION                                  *atlassian-introduction*
 
 An opinionated Neovim interface for Atlassian Jira and Confluence Cloud.
-Edit issues and wiki pages directly inside Neovim using Confluence
-Storage Format (CSF, XML-like) with tree-sitter conceal for readable
-rendering.
+View and edit issues and wiki pages directly inside Neovim using an
+ADF projection engine that renders clean text with extmarks.
 
 Features:
 
-  - Fuzzy search and telescope-style pickers
-  - Kanban boards for sprints and projects
+  - ADF projection editor: clean text buffer over ADF tree
+  - Outline board with hierarchy, urgency heatmap, grouping
+  - Fuzzy search via snacks.nvim pickers
   - Draft-first editing: `:w` saves locally, `<leader>ss` submits
   - Offline queue for write operations
+  - Markdown-style input shortcuts in editor
+  - Image and PDF preview (image.nvim / snacks.image)
+  - Protocol handlers: `:edit jira://PROJ-123`
   - Slash commands (blink.cmp integration)
-  - Image preview in floating windows
-  - LaTeX math rendering to unicode
-  - CSF tree-sitter parser with conceal
+  - CSF tree-sitter parser (legacy)
 
 ===========================================================================
 2. SETUP                                               *atlassian-setup*
@@ -85,18 +86,18 @@ strings in your config (they will end up in version control).
 
 COMMANDS                                        *atlassian-jira-commands*
 
+Board ~
+
+  :JiraBoard [project]        Open outline board (my work)
+                              Use `gq` inside the board to switch
+                              queries (assigned, created, epics,
+                              team workload, due dates, custom JQL)
+  :JiraMe                     Alias for :JiraBoard
+
 Search ~
 
   :JiraSearch                 Fuzzy search across all issues
   :JiraSearchEdit             Search and edit an issue
-  :JiraMe                     Issues assigned to me
-  :JiraCreatedByMe            Issues I created
-  :JiraProject [name]         Issues in a project
-  :JiraEpics                  List epics
-  :JiraFeatures               List features
-  :JiraTasks                  List tasks
-  :JiraDue [filter]           Due-date filter
-                              Filters: overdue, today, week, soon
 
 Common ~
 
@@ -105,8 +106,8 @@ Common ~
 
 Issue Management ~
 
-  :JiraView [key]             View issue details
-  :JiraEdit [key]             Edit issue in CSF buffer
+  :JiraView [key]             View issue (projected editor)
+  :JiraEdit [key]             Edit issue (projected editor)
   :JiraTransition [key]       Change issue status
   :JiraStart [key]            Move issue to In Progress
   :JiraDone [key]             Move issue to Done
@@ -128,11 +129,8 @@ Filters ~
   :JiraFilter list            List all saved filters
   :JiraFilter delete <name>   Delete a saved filter
 
-Team and Board ~
+Other ~
 
-  :JiraTeam [project]         View team members
-  :JiraBoard [board_id]       Open kanban board
-  :JiraSprint [board_id]      View active sprint
   :JiraTodoToIssue [opts]     Convert TODOs to issues
                               Options: buffer, project
 
@@ -152,13 +150,58 @@ Utility ~
   :JiraDebug [key]            Debug information
 
 ---------------------------------------------------------------------------
+BOARD KEYMAPS                                   *atlassian-board-keymaps*
+
+These mappings are available in the outline board buffer:
+
+  Navigation ~
+
+  Key           Action ~
+  <CR>          Toggle expand / open issue
+  za            Toggle expand/collapse
+  zo            Expand (open fold)
+  zc            Collapse (close fold)
+  zO            Expand all recursively
+  zM            Collapse all
+  ]i / [i       Jump to next / previous issue
+
+  Actions ~
+
+  Key           Action ~
+  e             Edit issue (projected editor)
+  t             Transition (change status)
+  a             Assign issue (picker)
+  c             Add comment
+  y             Copy issue key to clipboard
+  gx            Open issue in browser
+
+  Grouping ~
+
+  Key           Action ~
+  gs            Group by status
+  ga            Group by assignee
+  gp            Group by product area
+  gi            Group by priority (Highest → Lowest)
+  gd            Group by due date
+  gt            Group by type
+  gn            No grouping
+  gq            Switch query (JQL preset picker)
+
+  Other ~
+
+  Key           Action ~
+  r             Refresh data from API
+  q             Close board
+  ?             Show help
+
+---------------------------------------------------------------------------
 ISSUE VIEW KEYMAPS                              *atlassian-jira-keymaps*
 
 These mappings are available inside a Jira issue-view buffer:
 
   Key           Action ~
   t             Transition (change status)
-  e             Edit issue in CSF buffer
+  e             Edit issue (projected editor)
   a             Assign issue (picker)
   c             Add comment
   C             Edit comment (picker)
@@ -169,20 +212,69 @@ These mappings are available inside a Jira issue-view buffer:
   s             Show children / sub-tasks
   y             Copy issue key to clipboard
   Y             Copy issue URL to clipboard
-  gx            Open link under cursor in browser
+  gx / gf       Open link under cursor in browser
+  K             Preview image / PDF at cursor
   ?             Show keymap help
 
+---------------------------------------------------------------------------
 EDIT BUFFER KEYMAPS                 *atlassian-edit-keymaps*
 
-These mappings are available in any edit/create/comment buffer
+These mappings are available in projected edit buffers
 (Jira and Confluence):
+
+  Structural ~
+
+  Key           Action ~
+  <CR> (insert) Split paragraph / new list item
+  <BS> (insert) Merge with previous (at col 0)
+  J             Join adjacent paragraphs
+  <CR> (normal) Toggle task checkbox
+  >>            Indent list item
+  <<            Outdent list item
+  ]c / [c       Next / previous table cell
+
+  Mark Toggling (visual mode) ~
+
+  Key           Action ~
+  <leader>b     Toggle bold
+  <leader>i     Toggle italic
+  <leader>c     Toggle code
+  <leader>s     Toggle strikethrough
+  <leader>k     Toggle link
+
+  Insert Blocks (normal mode) ~
+
+  Key           Action ~
+  <leader>ih    Insert heading (prompts for level)
+  <leader>ic    Insert code block (prompts for language)
+  <leader>it    Insert table (prompts for rows×cols)
+  <leader>ip    Insert panel (select type)
+  <leader>il    Insert bullet list
+
+  Markdown Shortcuts (insert mode) ~
+
+  Typing these at the start of a line converts the paragraph:
+
+  Input         Result ~
+  # text        Heading 1
+  ## text       Heading 2 (up to ######)
+  - text        Bullet list item
+  * text        Bullet list item
+  1. text       Ordered list item
+  - [ ] text    Task item (TODO)
+  - [x] text    Task item (DONE)
+  > text        Blockquote
+  ---           Horizontal rule
+  ```           Code block
+
+  Submit ~
 
   Key           Action ~
   :w            Save draft locally (no API call)
   <leader>ss    Submit changes to remote API
   :AtlassianSubmit  Same as `<leader>ss`
 
-The winbar shows "DRAFT" while the buffer has not been submitted.
+The winbar shows "DRAFT" while unsaved, "SAVED" after submit.
 
 ---------------------------------------------------------------------------
 PICKER KEYMAPS                           *atlassian-jira-picker-keymaps*
@@ -542,6 +634,13 @@ are optional; the defaults are shown below.
       statuses = {
         "To Do", "In Progress", "In Review",
         "Blocked", "Done",
+      },
+
+      -- Board
+      board = {
+        workable_jql = nil,  -- string: JQL predicate for status bar
+                             -- e.g. 'issuetype in ("Task", "Bug")'
+                             -- nil = count leaf nodes (no children)
       },
 
       -- Custom fields: map section heading → Jira field ID

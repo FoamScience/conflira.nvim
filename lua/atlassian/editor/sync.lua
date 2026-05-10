@@ -239,20 +239,50 @@ function M.attach(eb)
 
 		if not vim.api.nvim_buf_is_valid(buf) then return end
 
-		local lines_added = last_new - last_old
+		local ok, err = pcall(function()
+			local lines_delta = last_new - last_old
 
-		if lines_added == 0 then
-			-- Same line count — text-only change
-			for line = first, last_new - 1 do
-				local handled = sync_line(eb, line)
-				if handled then
-					refresh_line_extmarks(eb, line)
+			if lines_delta == 0 then
+				for line = first, last_new - 1 do
+					local handled = sync_line(eb, line)
+					if handled then
+						refresh_line_extmarks(eb, line)
+					end
 				end
+			elseif lines_delta > 0 then
+				-- Lines added (paste, Enter, etc.)
+				-- Try to absorb new lines as new paragraph nodes
+				local spans = eb.line_to_spans[first]
+				if spans and #spans > 0 then
+					local top_idx = spans[1].path[1]
+					local node = (eb.adf.content or {})[top_idx]
+
+					if node and node.type == "paragraph" then
+						-- Update existing paragraph with first line text
+						local new_lines = vim.api.nvim_buf_get_lines(buf, first, last_new, false)
+						if new_lines and #new_lines > 0 then
+							node.content = { { type = "text", text = new_lines[1] or "" } }
+							-- Insert new paragraphs for each additional line
+							for i = 2, #new_lines do
+								local new_para = {
+									type = "paragraph",
+									content = { { type = "text", text = new_lines[i] or "" } },
+								}
+								table.insert(eb.adf.content, top_idx + i - 1, new_para)
+							end
+							eb.dirty = true
+						end
+					end
+				end
+				full_rerender(eb)
+			else
+				-- Lines removed (delete, join)
+				full_rerender(eb)
 			end
-		else
-			-- Line count changed — structural edit. Full re-render for now.
-			-- Phase 3 will handle this more granularly (paragraph split/merge, etc.)
-			full_rerender(eb)
+		end)
+		if not ok then
+			vim.notify("sync error: " .. tostring(err), vim.log.levels.DEBUG)
+			pcall(full_rerender, eb)
 		end
 	end
 

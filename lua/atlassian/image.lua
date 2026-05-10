@@ -180,6 +180,50 @@ local function get_buf_context(buf)
 end
 
 local IMAGE_EXTS = { png = true, jpg = true, jpeg = true, gif = true, bmp = true, webp = true, svg = true, tiff = true }
+local PDF_EXTS = { pdf = true }
+
+--- Convert first page of a PDF to PNG via magick CLI. Result is cached.
+---@param pdf_path string Local path to the PDF file
+---@param cb fun(err: string|nil, png_path: string|nil)
+function M.convert_pdf_to_png(pdf_path, cb)
+    local cache_dir = M.get_cache_dir()
+    local hash = vim.fn.sha256(pdf_path):sub(1, 16)
+    local png_path = cache_dir .. "/" .. hash .. "_p1.png"
+
+    if vim.fn.filereadable(png_path) == 1 then
+        cb(nil, png_path)
+        return
+    end
+
+    vim.fn.mkdir(cache_dir, "p")
+    -- ImageMagick 7 uses "magick", ImageMagick 6 uses "convert"
+    local cmd = vim.fn.executable("magick") == 1 and "magick" or "convert"
+    vim.system(
+        { cmd, pdf_path .. "[0]", "-density", "150", "-background", "white", "-alpha", "remove", png_path },
+        { text = false },
+        function(result)
+            vim.schedule(function()
+                if result.code ~= 0 then
+                    cb("magick convert failed: " .. (result.stderr or ""), nil)
+                    return
+                end
+                if vim.fn.filereadable(png_path) == 1 then
+                    cb(nil, png_path)
+                else
+                    cb("PNG not created", nil)
+                end
+            end)
+        end
+    )
+end
+
+--- Check if a filename is a previewable document (PDF)
+---@param name string
+---@return boolean
+function M.is_pdf_filename(name)
+    local ext = name:lower():match("%.(%w+)$")
+    return ext and PDF_EXTS[ext] or false
+end
 
 --- Check if a filename has an image extension
 ---@param name string
@@ -280,7 +324,7 @@ function M.show_hover(path, source_buf)
     if not backend then return end
 
     local max_w = math.min(80, math.floor(vim.o.columns * 0.4))
-    local max_h = math.min(40, math.floor(vim.o.lines * 0.5))
+    local max_h = math.floor(vim.o.lines * 0.9)
 
     local float_buf = vim.api.nvim_create_buf(false, true)
     vim.bo[float_buf].bufhidden = "wipe"

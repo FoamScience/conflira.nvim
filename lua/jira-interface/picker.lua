@@ -135,7 +135,7 @@ function M.show_issues(issues, opts)
                 if item and item.issue then
                     picker:close()
                     local ui = require("jira-interface.ui")
-                    ui.edit_issue(item.issue.key)
+                    ui.edit_issue_projected(item.issue.key)
                 end
             end,
             children = function(picker, item)
@@ -288,7 +288,7 @@ function M.search_all_edit()
             title = "Edit: " .. query,
             on_confirm = function(issue)
                 local ui = require("jira-interface.ui")
-                ui.edit_issue(issue.key)
+                ui.edit_issue_projected(issue.key)
             end,
         })
     end)

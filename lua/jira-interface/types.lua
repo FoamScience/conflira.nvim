@@ -148,6 +148,8 @@ function M.parse_issue(raw)
         acceptance_criteria_raw = M.parse_acceptance_criteria_raw(fields), -- raw ADF for AC field
         custom_fields_raw = M.parse_custom_fields_raw(fields), -- raw values for all custom_fields
         status = is_table(fields.status) and fields.status.name or "Unknown",
+        priority = is_table(fields.priority) and fields.priority.name or nil,
+        priority_id = is_table(fields.priority) and fields.priority.id or nil,
         type = issue_type,
         level = M.get_level(issue_type),
         project = is_table(fields.project) and fields.project.key or "",

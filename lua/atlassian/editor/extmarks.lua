@@ -78,7 +78,7 @@ function M.setup()
 	set(0, "AtlasPanelError", { link = "DiagnosticError" })
 
 	-- Table
-	set(0, "AtlasTableBorder", { link = "FloatBorder" })
+	set(0, "AtlasTableBorder", { link = "NonText" })
 	set(0, "AtlasTableHeader", { link = "@markup.heading" })
 	set(0, "AtlasTableDelimiter", { link = "Delimiter" })
 
