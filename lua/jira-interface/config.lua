@@ -63,7 +63,15 @@ M.defaults = {
         "Done",
     },
     board = {
-        workable_jql = nil, -- JQL predicate for "workable" items in status bar (e.g., 'issuetype in ("Task", "Bug")')
+        workable_jql = nil,
+        type_icons = {
+            Epic = "◆",
+            Feature = "◆",
+            Bug = "●",
+            Issue = "◆",
+            Task = "◇",
+            ["Sub-Task"] = "○",
+        },
     },
     custom_fields = {},
     data_dir = vim.fn.stdpath("data") .. "/jira-interface",

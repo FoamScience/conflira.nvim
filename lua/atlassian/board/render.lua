@@ -15,14 +15,21 @@ local urgency_signs = {
 	normal = { text = " ", hl = "Normal" },
 }
 
-local type_icons = {
-	Epic = { icon = "◆", hl = "@markup.heading.1" },
-	Feature = { icon = "◆", hl = "@markup.heading.2" },
-	Bug = { icon = "●", hl = "DiagnosticError" },
-	Issue = { icon = "◆", hl = "@markup.heading.3" },
-	Task = { icon = "◆", hl = "Function" },
-	["Sub-Task"] = { icon = "◇", hl = "Identifier" },
+local default_type_icons = {
+	Epic = "◆",
+	Feature = "◆",
+	Bug = "●",
+	Issue = "◆",
+	Task = "◇",
+	["Sub-Task"] = "○",
 }
+
+local function get_type_icon(issue_type)
+	local config = require("jira-interface.config")
+	local configured = config.options.board and config.options.board.type_icons
+	local icons = configured or default_type_icons
+	return icons[issue_type] or icons.Task or "◆"
+end
 
 local type_hls = {
 	Epic = "@markup.heading.1",
@@ -66,6 +73,28 @@ end
 ---@return BoardRenderResult
 function M.render(board_state)
 	M.setup()
+
+	-- Compute title column: all summaries start at same display column
+	-- title_col = max_prefix_dw + icon(2) + max_key_dw + gap(2)
+	-- max_prefix_dw accounts for deepest nesting: "  │   └── " etc.
+	local max_key_dw = 0
+	local max_depth = 0
+	local function scan_depth(nodes, d)
+		for _, node in ipairs(nodes) do
+			local dw = vim.fn.strdisplaywidth(node.issue.key or "")
+			if dw > max_key_dw then max_key_dw = dw end
+			if d > max_depth then max_depth = d end
+			if #node.children > 0 then
+				scan_depth(node.children, d + 1)
+			end
+		end
+	end
+	scan_depth(board_state.tree, 0)
+	max_key_dw = math.max(max_key_dw, 8)
+	-- prefix at depth d: root="▼ "(2) or "  "+"│   "*d+"└── "(4) = 2+4*d+4
+	-- icon = 2 display chars, gap = 2
+	local deepest_prefix = 2 + 4 * max_depth + 4
+	local title_col = deepest_prefix + 2 + max_key_dw + 2
 
 	local lines = {}
 	local marks = {}
@@ -187,7 +216,7 @@ function M.render(board_state)
 				add_line("")
 			end
 			local is_last_root = ni == #group.nodes
-			render_node(lines, marks, line_to_node, node, 0, is_last_root, {}, add_line, add_mark)
+			render_node(lines, marks, line_to_node, node, 0, is_last_root, {}, add_line, add_mark, max_key_dw, title_col)
 			line = #lines
 		end
 	end
@@ -214,7 +243,7 @@ end
 ---@param ancestors string[]
 ---@param add_line fun(text: string): number
 ---@param add_mark fun(l: number, col: number, opts: table)
-function render_node(lines, marks, line_to_node, node, depth, is_last, ancestors, add_line, add_mark)
+function render_node(lines, marks, line_to_node, node, depth, is_last, ancestors, add_line, add_mark, max_key_dw, title_col)
 	local issue = node.issue
 	local ancestor_prefix = table.concat(ancestors)
 
@@ -223,9 +252,10 @@ function render_node(lines, marks, line_to_node, node, depth, is_last, ancestors
 		tree_char = is_last and "└── " or "├── "
 	end
 
-	-- Type icon
-	local ti = type_icons[issue.type] or type_icons.Task
-	local type_icon = ti.icon .. " "
+	-- Type icon (configurable)
+	local type_icon_char = get_type_icon(issue.type)
+	local type_icon = type_icon_char .. " "
+	local type_hl = type_hls[issue.type] or "Identifier"
 
 	-- Expand indicator for root/parent nodes
 	local expand = ""
@@ -235,19 +265,24 @@ function render_node(lines, marks, line_to_node, node, depth, is_last, ancestors
 
 	-- Issue key
 	local key_text = issue.key or ""
-	local key_padded = key_text .. string.rep(" ", math.max(0, 8 - vim.fn.strdisplaywidth(key_text)))
+
+	-- Build left part: prefix + key, padded so title starts at title_col
+	local prefix = ancestor_prefix .. tree_char .. expand
+	local prefix_dw = vim.fn.strdisplaywidth(prefix)
+	-- icon(2) + key + padding to reach title_col
+	local left_dw = prefix_dw + 2 + vim.fn.strdisplaywidth(key_text)
+	local pad_to_title = math.max(2, title_col - left_dw)
+	local key_padded = key_text .. string.rep(" ", pad_to_title)
 
 	-- Summary
 	local summary = issue.summary or ""
-	local prefix_dw = vim.fn.strdisplaywidth(ancestor_prefix .. tree_char .. type_icon .. expand)
-	local max_summary = math.max(20, 55 - prefix_dw)
+	local max_summary = math.max(20, 70)
 	if #summary > max_summary then
 		summary = summary:sub(1, max_summary - 1) .. "…"
 	end
 
-	-- Build the line
-	local prefix = ancestor_prefix .. tree_char .. expand
-	local main = key_padded .. "  " .. summary
+	-- Build the line: prefix + key_padded + summary
+	local main = key_padded .. summary
 	local header_text = prefix .. main
 
 	local l = add_line(header_text)
@@ -259,7 +294,7 @@ function render_node(lines, marks, line_to_node, node, depth, is_last, ancestors
 
 	-- Type icon as inline virtual text before the key
 	add_mark(l, #prefix, {
-		virt_text = { { type_icon, node.is_context and "Comment" or ti.hl } },
+		virt_text = { { type_icon, node.is_context and "Comment" or type_hl } },
 		virt_text_pos = "inline",
 	})
 
@@ -269,8 +304,8 @@ function render_node(lines, marks, line_to_node, node, depth, is_last, ancestors
 	local key_hl = node.is_context and "Comment" or (type_hls[issue.type] or "Identifier")
 	add_mark(l, key_start, { end_col = key_end, hl_group = key_hl })
 
-	-- Summary highlight
-	local sum_start = key_start + #key_padded + 2
+	-- Summary highlight — starts after the padded key
+	local sum_start = key_start + #key_padded
 	local sum_end = sum_start + #summary
 	local sum_hl = node.is_context and "Comment" or "Normal"
 	add_mark(l, sum_start, { end_col = math.min(sum_end, #header_text), hl_group = sum_hl })
@@ -296,14 +331,17 @@ function render_node(lines, marks, line_to_node, node, depth, is_last, ancestors
 		virt_text_pos = "right_align",
 	})
 
-	-- Detail line (below header)
+	-- Detail line: tree continuation padded to title_col, then detail content
 	if node.expanded or depth > 0 then
-		local detail_prefix
+		local detail_tree
 		if depth > 0 then
-			detail_prefix = ancestor_prefix .. (is_last and "    " or "│   ")
+			detail_tree = ancestor_prefix .. (is_last and "    " or "│   ")
 		else
-			detail_prefix = "  "
+			detail_tree = "  │"
 		end
+		local detail_tree_dw = vim.fn.strdisplaywidth(detail_tree)
+		local detail_pad = math.max(0, title_col - detail_tree_dw)
+		local detail_prefix = detail_tree .. string.rep(" ", detail_pad)
 
 		-- Build detail as virtual text with per-segment highlighting
 		local detail_vt = {}
@@ -357,11 +395,11 @@ function render_node(lines, marks, line_to_node, node, depth, is_last, ancestors
 		end
 
 		if #detail_vt > 0 then
-		local detail_text = detail_prefix .. "│"
-		local dl = add_line(detail_text)
+		table.insert(detail_vt, 1, { "│ ", "NonText" })
+		local dl = add_line(detail_prefix)
 		line_to_node[dl] = node
-		add_mark(dl, 0, { end_col = #detail_text, hl_group = "NonText" })
-		add_mark(dl, #detail_text, {
+		add_mark(dl, 0, { end_col = #detail_prefix, hl_group = "NonText" })
+		add_mark(dl, #detail_prefix, {
 			virt_text = detail_vt,
 			virt_text_pos = "inline",
 		})
@@ -383,7 +421,7 @@ function render_node(lines, marks, line_to_node, node, depth, is_last, ancestors
 
 		for ci, child in ipairs(node.children) do
 			local child_is_last = ci == #node.children
-			render_node(lines, marks, line_to_node, child, depth + 1, child_is_last, child_ancestors, add_line, add_mark)
+			render_node(lines, marks, line_to_node, child, depth + 1, child_is_last, child_ancestors, add_line, add_mark, max_key_dw, title_col)
 		end
 	end
 end
