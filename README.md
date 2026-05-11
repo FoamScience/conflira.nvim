@@ -10,7 +10,7 @@ A Neovim plugin for Jira and Confluence with an ADF projection editor, outline b
 ### Required
 
 - Neovim >= 0.11.4
-- [snacks.nvim](https://github.com/folke/snacks.nvim) — picker UI and notifications
+- [snacks.nvim](https://github.com/folke/snacks.nvim) — picker UI and notifications  (auto-installed with the plugin)
 - `curl` — HTTP requests to Jira/Confluence REST APIs
 - A nerd font with ligatures support. You can get some with [getnf](https://github.com/getnf/getnf)
 - An Atlassian API token
@@ -113,7 +113,8 @@ sources = {
 
 ### ADF Projection Editor
 
-Issues and pages are edited using an ADF (Atlassian Document Format) projection engine. The ADF tree lives in memory; the buffer shows clean text with extmark-based styling:
+Issues and pages are edited using an ADF (Atlassian Document Format) projection engine.
+The ADF tree lives in memory; the buffer shows clean text with extmark-based styling:
 
 - **Headings** — plain text with highlight + sign icon
 - **Bold, italic, code, links** — extmark highlights, no XML visible
@@ -123,7 +124,7 @@ Issues and pages are edited using an ADF (Atlassian Document Format) projection 
 - **Panels** — icon + colored bar (info/note/warning/tip)
 - **Images** — `K` to preview in floating window (supports PDF first page)
 
-Markdown-style shortcuts work in insert mode (`## ` for heading, `- ` for list, `- [ ] ` for task, `> ` for quote, `---` for rule, ` ``` ` for code block).
+Markdown-style shortcuts work in insert mode (`## ` for heading, `- ` for list, `- [ ] ` for task, `> ` for quote, `---` for rule, \`\`\` for code blocks).
 
 Draft-first editing: `:w` saves locally, `<leader>ss` submits to API.
 
@@ -133,7 +134,6 @@ Draft-first editing: `:w` saves locally, `<leader>ss` submits to API.
 
 - **Tree hierarchy** — Feature → Task with expand/collapse (`za`, `zo`, `zc`, `zO`, `zM`)
 - **Urgency heatmap** — colored dots in sign column (overdue, blocked, due soon, stale)
-- **Right-aligned** assignee + status badge per issue
 - **Detail lines** — reviewer, subtask progress bar, due dates
 - **Grouping** — `gs` status, `ga` assignee, `gp` product area, `gi` priority, `gd` due date, `gt` type
 - **Query switching** — `gq` opens a picker with presets (my work, assigned, created, epics, team workload, overdue, saved filters, custom JQL)
@@ -160,7 +160,6 @@ Context parents (shown because their child involves you) render dimmed. Fully-do
 - Issue links — add, delete
 - Custom JQL filters (`:JiraFilter save/load/list/delete`)
 - Offline queue and sync (`:JiraQueue`, `:JiraSync`)
-- Git hunk tracking (`:JiraHunks`)
 
 ### Confluence
 
@@ -168,16 +167,6 @@ Context parents (shown because their child involves you) render dimmed. Fully-do
 - View, edit, create pages with the projection editor
 - CQL search and saved filters
 - Page mentions search
-
-### Git Hunk Tracking
-
-Track unstaged and staged changes tied to a Jira issue:
-
-```
-:JiraHunks PROJ-123                    " track changes in cwd
-:JiraHunks PROJ-123 ~/repo1 ~/repo2   " track across repos
-:JiraHunksStop                         " stop auto-refresh
-```
 
 ### Health Check
 

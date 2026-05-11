@@ -98,10 +98,6 @@ M.defaults = {
         inline_macro = "mathinline",   -- ac:name for new inline equations
         inline_param = "body",         -- parameter name for inline LaTeX source
     },
-    hunks = {
-        enabled = true,                -- set to false to disable :JiraHunks commands
-        refresh_debounce = 500,        -- ms to wait after save before refreshing
-    },
 }
 
 ---@type JiraConfig
