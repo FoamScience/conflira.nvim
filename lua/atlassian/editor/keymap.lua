@@ -478,7 +478,7 @@ end
 -- Visual mode: mark toggling
 -- ============================================================================
 
-local function toggle_mark(eb, mark_type)
+local function toggle_mark(eb, mark_type, attrs)
 	local start_pos = vim.fn.getpos("v")
 	local end_pos = vim.fn.getpos(".")
 	-- Normalize so start <= end
@@ -512,7 +512,9 @@ local function toggle_mark(eb, mark_type)
 						table.remove(node.marks, found)
 						if #node.marks == 0 then node.marks = nil end
 					else
-						table.insert(node.marks, { type = mark_type })
+						local mark = { type = mark_type }
+						if attrs then mark.attrs = attrs end
+						table.insert(node.marks, mark)
 					end
 				end
 			end
@@ -639,17 +641,19 @@ function M.attach(eb)
 	vim.keymap.set("n", "]c", function() handle_tab_table(eb, false) end, opts("Next table cell"))
 	vim.keymap.set("n", "[c", function() handle_tab_table(eb, true) end, opts("Prev table cell"))
 
-	-- Visual mode mark toggling
+	-- Visual mode mark toggling (buffer-local, no conflict with global <leader>j)
 	vim.keymap.set("v", "<leader>b", function() toggle_mark(eb, "strong") end, opts("Toggle bold"))
 	vim.keymap.set("v", "<leader>i", function() toggle_mark(eb, "em") end, opts("Toggle italic"))
 	vim.keymap.set("v", "<leader>c", function() toggle_mark(eb, "code") end, opts("Toggle code"))
 	vim.keymap.set("v", "<leader>s", function() toggle_mark(eb, "strike") end, opts("Toggle strikethrough"))
 	vim.keymap.set("v", "<leader>k", function()
-		-- TODO: prompt for URL
-		toggle_mark(eb, "link")
+		vim.ui.input({ prompt = "URL: " }, function(url)
+			if not url or url == "" then return end
+			toggle_mark(eb, "link", { href = url })
+		end)
 	end, opts("Toggle link"))
 
-	-- Insert blocks
+	-- Insert blocks (buffer-local)
 	vim.keymap.set("n", "<leader>ih", function() prompt_insert_heading(eb) end, opts("Insert heading"))
 	vim.keymap.set("n", "<leader>ic", function() prompt_insert_code_block(eb) end, opts("Insert code block"))
 	vim.keymap.set("n", "<leader>it", function() prompt_insert_table(eb) end, opts("Insert table"))

@@ -6,7 +6,6 @@ local M = {}
 local api = require("jira-interface.api")
 local cache = require("jira-interface.cache")
 local config = require("jira-interface.config")
-local csf = require("atlassian.csf")
 local bridge = require("atlassian.csf.bridge")
 
 -- =============================================================================
@@ -357,6 +356,131 @@ end
 
 -- =============================================================================
 -- Fetching with cache
+-- =============================================================================
+-- ADF-based template and extraction (projection editor)
+-- =============================================================================
+
+---@param classified ClassifiedFields
+---@param issue_type_name string
+---@return table ADF document
+---@return table section_map
+function M.generate_template_adf(classified, issue_type_name)
+    local content = {}
+    local section_map = {}
+
+    -- Title heading
+    table.insert(content, {
+        type = "heading", attrs = { level = 1 },
+        content = { { type = "text", text = issue_type_name } },
+    })
+    section_map[#content] = { field = "summary" }
+
+    -- Rich text sections
+    for _, field in ipairs(classified.rich_text) do
+        table.insert(content, {
+            type = "heading", attrs = { level = 2 },
+            content = { { type = "text", text = field.name } },
+        })
+        local start_idx = #content + 1
+        table.insert(content, {
+            type = "paragraph",
+            content = { { type = "text", text = "" } },
+        })
+        section_map[start_idx] = { field = field.fieldId, end_idx = #content }
+    end
+
+    -- Text line fields as bold label: value paragraphs
+    if #classified.text_line > 0 then
+        table.insert(content, { type = "rule" })
+        table.insert(content, {
+            type = "heading", attrs = { level = 2 },
+            content = { { type = "text", text = "Fields" } },
+        })
+        local fields_start = #content + 1
+        for _, field in ipairs(classified.text_line) do
+            local hint = M.get_field_hint(field)
+            local value_text = hint and ("(" .. hint .. ")") or ""
+            table.insert(content, {
+                type = "paragraph",
+                content = {
+                    { type = "text", text = field.name .. ": ", marks = { { type = "strong" } } },
+                    { type = "text", text = value_text },
+                },
+            })
+        end
+        section_map[fields_start] = { field = "_text_lines", end_idx = #content }
+    end
+
+    return { type = "doc", version = 1, content = content }, section_map
+end
+
+---@param adf table ADF document
+---@param section_map table
+---@param classified ClassifiedFields
+---@return table fields Jira API fields table
+function M.extract_fields_from_adf(adf, section_map, classified)
+    local fields = {}
+    local content = adf.content or {}
+
+    for start_idx, section in pairs(section_map) do
+        if section.field == "summary" then
+            local node = content[start_idx]
+            if node and node.content then
+                local texts = {}
+                for _, child in ipairs(node.content) do
+                    if child.type == "text" then texts[#texts + 1] = child.text or "" end
+                end
+                local summary = table.concat(texts)
+                if summary ~= "" then fields.summary = summary end
+            end
+        elseif section.field == "_text_lines" then
+            -- Extract text line values from bold-label paragraphs
+            local end_idx = section.end_idx or start_idx
+            for i = start_idx, end_idx do
+                local node = content[i]
+                if node and node.type == "paragraph" and node.content then
+                    -- Find the field name from the bold text
+                    local field_name, value_text
+                    for _, child in ipairs(node.content) do
+                        if child.marks then
+                            for _, mark in ipairs(child.marks) do
+                                if mark.type == "strong" then
+                                    field_name = (child.text or ""):gsub(":%s*$", "")
+                                end
+                            end
+                        elseif child.type == "text" and not child.marks then
+                            value_text = child.text or ""
+                        end
+                    end
+                    if field_name and value_text then
+                        value_text = value_text:gsub("^%s*%(.*%)%s*$", ""):gsub("^%s+", ""):gsub("%s+$", "")
+                        if value_text ~= "" then
+                            -- Find matching field
+                            for _, f in ipairs(classified.text_line) do
+                                if f.name == field_name then
+                                    fields[f.fieldId] = M.serialize_text_value(f, value_text)
+                                    break
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        else
+            -- Rich text field: collect ADF nodes
+            local end_idx = section.end_idx or start_idx
+            local section_content = {}
+            for i = start_idx, end_idx do
+                if content[i] then table.insert(section_content, content[i]) end
+            end
+            local section_adf = { type = "doc", version = 1, content = section_content }
+            fields[section.field] = bridge.sanitize_for_jira(section_adf)
+        end
+    end
+
+    return fields
+end
+
 -- =============================================================================
 
 ---@param project_key string

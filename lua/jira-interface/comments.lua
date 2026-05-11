@@ -6,67 +6,10 @@ local config = require("jira-interface.config")
 local notify = require("jira-interface.notify")
 local atlassian_ui = require("atlassian.ui")
 local atlassian_format = require("atlassian.format")
-local csf = require("atlassian.csf")
 local bridge = require("atlassian.csf.bridge")
 
--- Module-level storage for comment ADF bodies (can't serialize to vim.b)
 ---@type table<number, { issue_key: string, comments: JiraComment[] }>
 M._buf_comments = {}
-
----@param issue JiraIssue
----@return string[] CSF lines for the comments section
-function M.render_comments_section(issue)
-    local lines = {}
-    local comments = issue.comments or {}
-    local total = issue.comments_total or 0
-
-    table.insert(lines, "<hr />")
-    table.insert(lines, "<h2>Comments (" .. total .. ")</h2>")
-
-    if #comments == 0 then
-        table.insert(lines, "<p><em>No comments</em></p>")
-        return lines
-    end
-
-    for i, comment in ipairs(comments) do
-        if i > 1 then
-            table.insert(lines, "<hr />")
-        end
-
-        -- Header: author + relative time + edited indicator
-        local time_str = atlassian_format.format_relative_time(comment.created)
-        local header = comment.author_name .. " - " .. time_str
-        if comment.updated ~= "" and comment.updated ~= comment.created then
-            header = header .. " (edited)"
-        end
-        table.insert(lines, "<h3>" .. header .. "</h3>")
-
-        -- Body: ADF -> CSF
-        if comment.body and type(comment.body) == "table" and comment.body.content then
-            local body_csf = bridge.adf_to_csf(comment.body)
-            vim.list_extend(lines, csf.format_lines(body_csf))
-        else
-            table.insert(lines, "<p><em>Empty comment</em></p>")
-        end
-    end
-
-    return lines
-end
-
----@param opts { width?: number, height?: number, title?: string }
----@return number, number Buffer and window IDs
-local function create_window(opts)
-    local display = vim.tbl_extend("force", config.options.display or {}, {})
-    display.mode = "buffer"
-    return atlassian_ui.create_window({
-        width = opts and opts.width,
-        height = opts and opts.height,
-        title = opts and opts.title,
-        bufname = opts and opts.bufname,
-        display = display,
-        filetype = "csf",
-    })
-end
 
 --- Refresh the issue view buffer after a comment action
 ---@param issue_key string
@@ -83,49 +26,54 @@ end
 
 ---@param issue_key string
 function M.add_comment(issue_key)
-    local buf, _ = create_window({
+    local editor = require("atlassian.editor")
+    local display = vim.tbl_extend("force", config.options.display or {}, {})
+    display.mode = "buffer"
+
+    local buf, win = atlassian_ui.create_window({
         title = "Add Comment - " .. issue_key,
         bufname = "jira://" .. issue_key .. "/comment/new",
+        display = display,
+        filetype = "atlassian",
     })
 
-    vim.bo[buf].buftype = "acwrite"
-
-    local lines = {
-        csf.generate_metadata({ type = "jira", key = issue_key }),
-        "<h2>New Comment</h2>",
-        "<p></p>",
+    local comment_adf = {
+        type = "doc", version = 1,
+        content = {
+            { type = "paragraph", content = { { type = "text", text = "" } } },
+        },
     }
 
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-
-    -- Place cursor inside the <p> tag
-    vim.api.nvim_win_set_cursor(0, { 3, 3 })
+    local eb = editor.open(comment_adf, {
+        type = "jira",
+        key = issue_key,
+    }, {
+        buf = buf,
+        win = win,
+        modifiable = true,
+    })
 
     local function do_submit()
-        local content = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+        local body_adf = bridge.sanitize_for_jira(vim.deepcopy(eb.adf))
 
-        -- Remove metadata line and <h2> header
-        table.remove(content, 1)
-        -- Remove section header
-        local body_lines = {}
-        local past_header = false
-        for _, line in ipairs(content) do
-            if past_header then
-                table.insert(body_lines, line)
-            elseif vim.trim(line):match("^<h2>") then
-                past_header = true
-            else
-                table.insert(body_lines, line)
+        -- Check if empty
+        local has_content = false
+        for _, node in ipairs(body_adf.content or {}) do
+            if node.content then
+                for _, child in ipairs(node.content) do
+                    if child.type == "text" and child.text and vim.trim(child.text) ~= "" then
+                        has_content = true
+                        break
+                    end
+                end
             end
+            if has_content then break end
         end
 
-        local body_csf = table.concat(body_lines, "\n")
-        if vim.trim(body_csf) == "" or vim.trim(body_csf) == "<p></p>" then
+        if not has_content then
             notify.info("Empty comment, not saving")
             return
         end
-
-        local body_adf = bridge.sanitize_for_jira(bridge.csf_to_adf(body_csf))
 
         if api.is_online then
             api.add_comment(issue_key, body_adf, function(add_err)
@@ -142,7 +90,8 @@ function M.add_comment(issue_key)
             end)
         else
             local queue = require("jira-interface.queue")
-            queue.queue_comment(issue_key, body_csf)
+            local csf_body = bridge.adf_to_csf(body_adf)
+            queue.queue_comment(issue_key, csf_body)
             if vim.api.nvim_buf_is_valid(buf) then
                 vim.api.nvim_buf_delete(buf, { force = true })
             end
@@ -155,56 +104,50 @@ end
 ---@param issue_key string
 ---@param comment JiraComment
 function M.edit_comment(issue_key, comment)
-    local buf, _ = create_window({
+    local editor = require("atlassian.editor")
+    local display = vim.tbl_extend("force", config.options.display or {}, {})
+    display.mode = "buffer"
+
+    local buf, win = atlassian_ui.create_window({
         title = "Edit Comment - " .. issue_key,
         bufname = "jira://" .. issue_key .. "/comment/" .. comment.id,
+        display = display,
+        filetype = "atlassian",
     })
 
-    vim.bo[buf].buftype = "acwrite"
-
-    local lines = {
-        csf.generate_metadata({ type = "jira", key = issue_key }),
-        "<h2>Edit Comment</h2>",
-    }
-
-    -- Pre-populate with existing comment body (ADF -> CSF)
+    -- Use existing comment body ADF, or empty
+    local comment_adf
     if comment.body and type(comment.body) == "table" and comment.body.content then
-        local body_csf = bridge.adf_to_csf(comment.body)
-        vim.list_extend(lines, csf.format_lines(body_csf))
+        comment_adf = vim.deepcopy(comment.body)
     else
-        table.insert(lines, "<p></p>")
+        comment_adf = {
+            type = "doc", version = 1,
+            content = {
+                { type = "paragraph", content = { { type = "text", text = "" } } },
+            },
+        }
     end
 
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    local eb = editor.open(comment_adf, {
+        type = "jira",
+        key = issue_key,
+    }, {
+        buf = buf,
+        win = win,
+        modifiable = true,
+    })
 
-    -- Store ADF body for reference
     M._buf_comments[buf] = { issue_key = issue_key, comment = comment }
     vim.api.nvim_create_autocmd("BufWipeout", {
         buffer = buf,
+        once = true,
         callback = function()
             M._buf_comments[buf] = nil
         end,
     })
 
     local function do_submit()
-        local content = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-
-        -- Remove metadata line and section header
-        table.remove(content, 1)
-        local body_lines = {}
-        local past_header = false
-        for _, line in ipairs(content) do
-            if past_header then
-                table.insert(body_lines, line)
-            elseif vim.trim(line):match("^<h2>") then
-                past_header = true
-            else
-                table.insert(body_lines, line)
-            end
-        end
-
-        local body_csf = table.concat(body_lines, "\n")
-        local body_adf = bridge.sanitize_for_jira(bridge.csf_to_adf(body_csf))
+        local body_adf = bridge.sanitize_for_jira(vim.deepcopy(eb.adf))
 
         api.update_comment(issue_key, comment.id, body_adf, function(update_err)
             if update_err then
@@ -225,7 +168,6 @@ end
 ---@param issue_key string
 ---@param comment JiraComment
 function M.delete_comment(issue_key, comment)
-    -- Build a preview of the comment
     local preview = comment.author_name .. ": "
     if comment.body and type(comment.body) == "table" and comment.body.content then
         local text = require("atlassian.adf").adf_to_text(comment.body)
@@ -250,7 +192,7 @@ end
 
 ---@param issue_key string
 ---@param comments JiraComment[]
----@param action_name string Display name for the action (e.g., "edit", "delete")
+---@param action_name string
 ---@param cb fun(comment: JiraComment)
 function M.select_comment(issue_key, comments, action_name, cb)
     if #comments == 0 then
@@ -259,7 +201,6 @@ function M.select_comment(issue_key, comments, action_name, cb)
     end
 
     local Snacks = require("snacks")
-    local atlassian_ui = require("atlassian.ui")
 
     local items = {}
     for idx, comment in ipairs(comments) do
@@ -296,8 +237,8 @@ function M.select_comment(issue_key, comments, action_name, cb)
         confirm = function(picker, item)
             picker:close()
             local selected = ms.get_selected(item, "comment")
-            for _, comment in ipairs(selected) do
-                cb(comment)
+            for _, c in ipairs(selected) do
+                cb(c)
             end
         end,
         actions = ms_actions,

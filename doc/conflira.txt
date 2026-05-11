@@ -10,9 +10,8 @@ CONTENTS                                             *atlassian-contents*
     2. Setup ............................... |atlassian-setup|
     3. Jira Interface ...................... |atlassian-jira|
     4. Confluence Interface ................ |atlassian-confluence|
-    5. CSF Support ......................... |atlassian-csf|
-    6. Slash Commands ...................... |atlassian-slash-commands|
-    7. Configuration ....................... |atlassian-configuration|
+    5. Editor .............................. |atlassian-editor|
+    6. Configuration ....................... |atlassian-configuration|
 
 ===========================================================================
 1. INTRODUCTION                                  *atlassian-introduction*
@@ -240,7 +239,7 @@ These mappings are available in projected edit buffers
   <leader>i     Toggle italic
   <leader>c     Toggle code
   <leader>s     Toggle strikethrough
-  <leader>k     Toggle link
+  <leader>k     Toggle link (prompts for URL)
 
   Insert Blocks (normal mode) ~
 
@@ -304,7 +303,7 @@ Navigation ~
 Page Management ~
 
   :ConfluenceView <id>        View page content
-  :ConfluenceEdit <id>        Edit page in CSF buffer
+  :ConfluenceEdit <id>        Edit page
   :ConfluenceDelete <id>      Delete a page
 
 Search ~
@@ -330,7 +329,7 @@ These mappings are available inside a Confluence page-view
 buffer:
 
   Key   Action ~
-  e     Edit page in CSF buffer
+  e     Edit page
   c     Show child pages
   y     Copy page ID to clipboard
   Y     Copy page URL to clipboard
@@ -352,251 +351,69 @@ These mappings are available in the Confluence fuzzy-picker:
   <C-x>     Delete page
 
 ===========================================================================
-5. CSF SUPPORT                                          *atlassian-csf*
+5. EDITOR                                          *atlassian-editor*
 
-OVERVIEW                                        *atlassian-csf-overview*
+OVERVIEW                                     *atlassian-editor-overview*
 
-Confluence Storage Format (CSF) is the native XML format used by
-Confluence and, via the ADF bridge, Jira.  All edit and create
-buffers use filetype `csf` with tree-sitter parsing for syntax
-highlighting and conceal.
+The plugin uses an ADF (Atlassian Document Format) projection
+engine.  The ADF tree is the source of truth, held in memory as
+a Lua table.  The buffer contains only clean, editable text.
+All visual decoration (headings, bold, lists, tables, panels)
+is rendered via Neovim extmarks.
 
-Raw XML tags are concealed into readable icons and symbols so
-that the buffer remains legible while you work with the
-underlying storage format.
-
-This is the core editing experience of the plugin.  Every Jira
-issue description and every Confluence page body is presented as
-a CSF buffer.
+This replaces the legacy CSF/XML editing approach entirely.
 
 ---------------------------------------------------------------------------
-TREESITTER                                   *atlassian-csf-treesitter*
+RENDERING                                    *atlassian-editor-rendering*
 
-The plugin relies on custom tree-sitter parser, `tree-sitter-csf`,
-which provides:
+Each ADF node type renders to clean text with extmark styling:
 
-  - Syntax highlighting  (queries/csf/highlights.scm)
-  - Conceal              (queries/csf/conceal.scm)
-  - Folds
-  - Indents
-  - Language injections  (for code snippets)
+  Node Type       Display ~
+  heading         Plain text + heading highlight + sign icon
+  paragraph       Word-wrapped at ~100 chars
+  bulletList      Bullet prefix via inline virtual text
+  orderedList     Number prefix via inline virtual text
+  taskList        Checkbox ([ ] / [x]) via inline virtual text
+  codeBlock       Bordered box with language label
+  table           Row-per-line, │ delimiters, box-drawing borders
+  blockquote      ▎ prefix with quote highlight
+  panel           Icon + colored left bar (info/note/warning/tip)
+  rule            ━━━ horizontal line
+  mediaSingle     [image: name] placeholder
+  mention         @name with link highlight
 
-When a CSF buffer is opened the following options are set
-automatically:
-
-  'conceallevel'  = 2
-  'concealcursor' = "nc"
-
----------------------------------------------------------------------------
-INPUT TRANSLATION                               *atlassian-csf-input*
-
-Markdown-like shortcuts are translated to CSF in insert mode.
-This lets you type familiar markup and have it converted to the
-correct XML on the fly.
-
-Block-level triggers (activated on Space after a prefix at the
-beginning of a line):
-
-  Input          CSF Output ~
-  #              <h1>
-  ##             <h2>
-  ###            <h3>
-  ####           <h4>
-  #####          <h5>
-  ######         <h6>
-  *              <li> wrapped in <ul>
-  1.             <li> wrapped in <ol>
-  - [ ]          Task list item (unchecked)
-  - [x]          Task list item (checked)
-  >              <blockquote>
-  ---            <hr />
-  $$             Math block macro
-
-Inline triggers (activated on closing delimiter):
-
-  Input          CSF Output ~
-  **text**       <strong>text</strong>
-  *text*         <em>text</em>
-  `text`         <code>text</code>
-  ~~text~~       <s>text</s>
-  [text](url)    <a href="url">text</a>
-  ![alt](url)    <ac:image> element
-  $text$         Inline math macro
-
-Enter key behavior:
-
-  - Auto-continues list items and task items
-  - Press Enter on an empty list item to exit the list
-
-Navigation:
-
-  ]]             Jump to next heading
-  [[             Jump to previous heading
+Text marks (bold, italic, code, link, strikethrough) are shown
+via extmark highlights — no XML tags visible.
 
 ---------------------------------------------------------------------------
-IMAGE PREVIEW                                   *atlassian-csf-images*
+IMAGE & PDF PREVIEW                          *atlassian-editor-images*
 
-Images embedded in CSF are previewed on cursor hover (`CursorHold`
-event) in a floating window anchored to the top-right corner of
-the editor.
+Images and PDF attachments can be previewed in a floating window.
+Supports both `3rd/image.nvim` and `snacks.image` backends
+(auto-detected).
 
   Key   Action ~
-  K     Manually trigger image preview (normal mode)
+  K     Preview image or PDF first page at cursor
 
-Supported tag patterns:
-
-  - `<ac:image>` tags
-  - `<a href="...">` attachment links with image extensions
-    (.png, .jpg, .jpeg, .gif, .svg, .webp)
-
-Downloaded images are cached locally at:
+PDF preview converts the first page to PNG via ImageMagick
+(`magick` or `convert`).  Results are cached locally at:
 >
     stdpath("cache") .. "/atlassian/images"
 <
 
 ---------------------------------------------------------------------------
-MATH RENDERING                                     *atlassian-csf-math*
+PROTOCOL HANDLERS                            *atlassian-editor-protocol*
 
-LaTeX equations inside `ac:structured-macro` elements are rendered
-to unicode characters in the buffer.
-
-Macro names:
-
-  ac:name            Usage ~
-  "mathblock"        Block-level equations (uses CDATA body)
-  "mathinline"       Inline equations (uses ac:parameter)
-
-Input shortcuts:
-
-  $...$              Insert inline math
-  $$                 Begin a math block
-
-Requirements:
-
-  - `latex2text` binary in PATH (from pylatexenc package)
-  - Math rendering is disabled when latex2text is not found
-
-Install latex2text:
->sh
-    uv tool install pylatexenc
+Open issues and pages directly:
+>
+    :edit jira://PROJ-123
+    :edit jira://PROJ-123/edit
+    :edit confluence://12345
+    :edit confluence://12345/edit
 <
 
----------------------------------------------------------------------------
-SLASH COMMANDS (CSF)                       *atlassian-csf-slash-commands*
-
-Type `/` in insert mode inside a CSF buffer to trigger a
-completion menu (via blink.cmp).  Select a template to insert
-the corresponding CSF snippet.
-
-Categories:
-
-  Formatting     Headings 1-6, Divider, Quote
-  Code           Code block (with language parameter)
-  Panels         Info, Note, Warning, Tip
-  Structure      Table, Expand, Task list, Bullet list,
-                 Numbered list
-  Media          Mention, Page link, Jira issue,
-                 External link, Upload
-  Inline         Date, Status
-  Math           Block math, Inline math
-
-All templates use LSP snippet format so that tab-stops land on
-the editable portions of the inserted markup.
-
 ===========================================================================
-6. SLASH COMMANDS                              *atlassian-slash-commands*
-
-Complete reference of slash commands and their CSF output.
-
-Formatting ~
-                                     *atlassian-slash-cmd-formatting*
-
-  Command          CSF Output ~
-  /Heading 1       <h1>$1</h1>
-  /Heading 2       <h2>$1</h2>
-  /Heading 3       <h3>$1</h3>
-  /Heading 4       <h4>$1</h4>
-  /Heading 5       <h5>$1</h5>
-  /Heading 6       <h6>$1</h6>
-  /Divider         <hr />
-  /Quote           <blockquote><p>$1</p></blockquote>
-
-Code ~
-                                          *atlassian-slash-cmd-code*
-
-  Command          CSF Output ~
-  /Code block      <ac:structured-macro ac:name="code">
-                     <ac:parameter ac:name="language">
-                       $1
-                     </ac:parameter>
-                     <ac:plain-text-body>
-                       <![CDATA[$2]]>
-                     </ac:plain-text-body>
-                   </ac:structured-macro>
-
-Panels ~
-                                        *atlassian-slash-cmd-panels*
-
-  Command          CSF Output ~
-  /Info panel      <ac:structured-macro ac:name="info">
-  /Note panel      <ac:structured-macro ac:name="note">
-  /Warning panel   <ac:structured-macro ac:name="warning">
-  /Tip panel       <ac:structured-macro ac:name="tip">
-
-Structure ~
-                                     *atlassian-slash-cmd-structure*
-
-  Command          CSF Output ~
-  /Table           <table> with <tr>, <th>, <td> structure
-  /Expand          <ac:structured-macro ac:name="expand">
-  /Task list       <ac:task-list> with <ac:task> items
-  /Bullet list     <ul><li>$1</li></ul>
-  /Numbered list   <ol><li>$1</li></ol>
-
-Media ~
-                                         *atlassian-slash-cmd-media*
-
-  Command          CSF Output ~
-  /Mention         <ac:link><ri:user ri:account-id="$1" />
-                   </ac:link>
-  /Page link       <ac:link><ri:page ri:content-title="$1" />
-                   </ac:link>
-  /Jira issue      <ac:structured-macro ac:name="jira">
-                     <ac:parameter ac:name="key">$1
-                     </ac:parameter>
-                   </ac:structured-macro>
-  /External link   <a href="$1">$2</a>
-  /Upload          Opens file picker, uploads attachment,
-                   inserts <ac:image> (images) or <a> tag
-
-Inline ~
-                                        *atlassian-slash-cmd-inline*
-
-  Command          CSF Output ~
-  /Date            <time datetime="$1" />
-  /Status          <ac:structured-macro ac:name="status">
-                     <ac:parameter ac:name="title">$1
-                     </ac:parameter>
-                     <ac:parameter ac:name="colour">$2
-                     </ac:parameter>
-                   </ac:structured-macro>
-
-Math ~
-                                          *atlassian-slash-cmd-math*
-
-  Command          CSF Output ~
-  /Math block      <ac:structured-macro ac:name="mathblock">
-                     <ac:plain-text-body>
-                       <![CDATA[$1]]>
-                     </ac:plain-text-body>
-                   </ac:structured-macro>
-  /Math inline     <ac:structured-macro ac:name="mathinline">
-                     <ac:parameter ac:name="body">$1
-                     </ac:parameter>
-                   </ac:structured-macro>
-
-===========================================================================
-7. CONFIGURATION                              *atlassian-configuration*
+6. CONFIGURATION                              *atlassian-configuration*
 
 JIRA CONFIGURATION                             *atlassian-jira-config*
 

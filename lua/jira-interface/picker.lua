@@ -9,7 +9,6 @@ local notify = require("jira-interface.notify")
 local createmeta = require("jira-interface.createmeta")
 local atlassian_ui = require("atlassian.ui")
 local atlassian_format = require("atlassian.format")
-local csf = require("atlassian.csf")
 local bridge = require("atlassian.csf.bridge")
 
 -- Fixed column widths
@@ -741,32 +740,39 @@ end
 ---@param classified ClassifiedFields
 ---@param picker_values table<string, any> Picker field selections (fieldId → API value)
 function M.open_create_buffer(project, issue_type, parent_key, classified, picker_values)
-    local buf = vim.api.nvim_create_buf(false, false)
-    local tmp_name = vim.fn.tempname() .. "_jira_create_" .. project .. "_" .. issue_type.name .. ".csf"
-    vim.api.nvim_buf_set_name(buf, tmp_name)
-    vim.bo[buf].bufhidden = "wipe"
-    vim.bo[buf].buftype = "acwrite"
-    vim.bo[buf].filetype = "csf"
+    local editor = require("atlassian.editor")
+    local display = vim.tbl_extend("force", config.options.display or {}, {})
+    display.mode = "buffer"
 
-    -- CSF metadata line + template from classified fields
-    local meta_line = csf.generate_metadata({
-        type = "jira", key = "NEW", project = project, issue_type = issue_type.name,
+    local buf, win = atlassian_ui.create_window({
+        title = "Create " .. issue_type.name .. " (" .. project .. ")",
+        bufname = "jira://create/" .. project .. "/" .. issue_type.name,
+        display = display,
+        filetype = "atlassian",
     })
-    local template_lines = createmeta.generate_template(classified, issue_type.name)
-    table.insert(template_lines, 1, meta_line)
 
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, template_lines)
+    local create_adf, section_map = createmeta.generate_template_adf(classified, issue_type.name)
 
-    -- Store metadata in module-level table (not vim.b, to avoid serialization issues)
+    local eb = editor.open(create_adf, {
+        type = "jira",
+        key = "NEW",
+        project = project,
+        issue_type = issue_type.name,
+    }, {
+        buf = buf,
+        win = win,
+        modifiable = true,
+    })
+
     create_buf_meta[buf] = {
         project = project,
         issue_type = issue_type,
         parent_key = parent_key,
         classified = classified,
         picker_values = picker_values,
+        section_map = section_map,
     }
 
-    -- Cleanup on buffer wipe
     vim.api.nvim_create_autocmd("BufWipeout", {
         buffer = buf,
         once = true,
@@ -775,42 +781,27 @@ function M.open_create_buffer(project, issue_type, parent_key, classified, picke
         end,
     })
 
-    vim.api.nvim_set_current_buf(buf)
-    atlassian_ui.apply_window_options(buf, vim.api.nvim_get_current_win(), config.options.display)
-    vim.bo[buf].modified = false
-
-    -- Submit handler
     local function do_submit()
-        -- Exit snippet session if active
-        local ls_ok2, ls = pcall(require, "luasnip")
-        if ls_ok2 and ls.get_active_snip() then
-            ls.unlink_current()
-        end
-
         local meta = create_buf_meta[buf]
         if not meta then
             notify.error("Buffer metadata lost")
             return
         end
 
-        -- Extract all fields from buffer using createmeta
-        local fields = createmeta.extract_fields_from_buffer(buf, meta.classified)
+        local fields = createmeta.extract_fields_from_adf(eb.adf, meta.section_map, meta.classified)
 
         if not fields.summary or fields.summary == "" or fields.summary == meta.issue_type.name then
-            notify.error("Summary is required (edit the <h1> title)")
+            notify.error("Summary is required (edit the title)")
             return
         end
 
-        -- Add project and issuetype
         fields.project = { key = meta.project }
         fields.issuetype = { id = meta.issue_type.id }
 
-        -- Add parent if specified
         if meta.parent_key then
             fields.parent = { key = meta.parent_key }
         end
 
-        -- Merge picker values
         for field_id, value in pairs(meta.picker_values or {}) do
             fields[field_id] = value
         end
@@ -831,15 +822,12 @@ function M.open_create_buffer(project, issue_type, parent_key, classified, picke
                 end
             end)
         else
-            -- Offline: queue with summary + description only
-            local desc_csf = nil
-            local content = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-            table.remove(content, 1) -- metadata
-            local _, remaining = csf.extract_title(content)
-            local parsed = csf.extract_sections(remaining, { "description" })
-            if parsed.description and parsed.description ~= "" then
-                desc_csf = parsed.description
+            local bridge = require("atlassian.csf.bridge")
+            local body_content = {}
+            for i = 2, #(eb.adf.content or {}) do
+                table.insert(body_content, eb.adf.content[i])
             end
+            local desc_csf = bridge.adf_to_csf({ type = "doc", version = 1, content = body_content })
 
             local queue = require("jira-interface.queue")
             queue.queue_create(meta.project, meta.issue_type.name, fields.summary, desc_csf, meta.parent_key)
