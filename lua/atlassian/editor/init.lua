@@ -187,11 +187,44 @@ function M.refresh(buf)
 	eb.suppress_sync = false
 end
 
+--- Resolve the auth config for a buffer's backend (jira/confluence).
+---@param meta table
+---@return table|nil
+local function get_auth_for(meta)
+	if meta.type == "jira" then
+		local ok, jc = pcall(require, "jira-interface.config")
+		if ok then return jc.options.auth end
+	elseif meta.type == "confluence" then
+		local ok, cc = pcall(require, "confluence-interface.config")
+		if ok then return cc.options.auth end
+	end
+	return nil
+end
+
 ---@param buf number
 ---@param eb EditorBuffer
 function M.setup_image_hover(buf, eb)
 	local image = require("atlassian.image")
 	local group = vim.api.nvim_create_augroup("atlas_editor_image_" .. buf, { clear = true })
+
+	-- Image attachments rendered as links (e.g. the Attachments section) are not
+	-- `media` nodes, so they have no image_ref. Detect image-filename links so they
+	-- can be previewed like embedded images.
+	local function get_image_link_at_cursor()
+		local row = vim.api.nvim_win_get_cursor(0)[1] - 1
+		local refs = eb.render_result and eb.render_result.link_refs and eb.render_result.link_refs[row]
+		if not refs then
+			return nil, row
+		end
+		local line_text = vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or ""
+		for _, ref in ipairs(refs) do
+			local link_text = line_text:sub(ref.col_start + 1, ref.col_end)
+			if ref.href and image.is_image_filename(link_text) then
+				return { href = ref.href, ext = link_text:lower():match("%.(%w+)$") }, row
+			end
+		end
+		return nil, row
+	end
 
 	local function get_image_ref_at_cursor()
 		local row = vim.api.nvim_win_get_cursor(0)[1] - 1 -- 0-indexed
@@ -244,6 +277,18 @@ function M.setup_image_hover(buf, eb)
 			local ref, row = get_image_ref_at_cursor()
 			if ref then
 				fetch_and_show(ref, row)
+				return
+			end
+			local img_link, link_row = get_image_link_at_cursor()
+			if img_link then
+				local auth = get_auth_for(eb.metadata)
+				image.download_file(img_link.href, auth, function(err, path)
+					if err or not path then return end
+					if not vim.api.nvim_buf_is_valid(buf) then return end
+					if vim.api.nvim_win_get_cursor(0)[1] - 1 == link_row then
+						image.show_hover(path, buf)
+					end
+				end, { ext = img_link.ext })
 				return
 			end
 			-- Keep hover open on link ref lines (PDF previews)
@@ -337,33 +382,29 @@ function M.setup_preview_keymap(buf, eb)
 				-- Extract filename from the line text to check extension
 				local line_text = vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or ""
 				local link_text = line_text:sub(best.col_start + 1, best.col_end)
+				local auth = get_auth_for(eb.metadata)
 
 				if image.is_pdf_filename(link_text) or best.href:lower():match("%.pdf") then
 					vim.notify("Fetching PDF preview...", vim.log.levels.INFO)
-					local meta = eb.metadata
-					local auth = nil
-					if meta.type == "jira" then
-						local ok, jc = pcall(require, "jira-interface.config")
-						if ok then auth = jc.options.auth end
-					elseif meta.type == "confluence" then
-						local ok, cc = pcall(require, "confluence-interface.config")
-						if ok then auth = cc.options.auth end
-					end
-
 					image.download_file(best.href, auth, function(err, pdf_path)
 						if err or not pdf_path then
 							vim.notify("PDF download failed: " .. (err or ""), vim.log.levels.ERROR)
 							return
 						end
-						image.convert_pdf_to_png(pdf_path, function(conv_err, png_path)
-							if conv_err or not png_path then
-								vim.notify("PDF convert failed: " .. (conv_err or ""), vim.log.levels.ERROR)
-								return
-							end
-							if not vim.api.nvim_buf_is_valid(buf) then return end
-							image.show_hover(png_path, buf)
-						end)
+						if not vim.api.nvim_buf_is_valid(buf) then return end
+						image.show_pdf(pdf_path, buf)
 					end, { ext = "pdf" })
+					return
+				elseif image.is_image_filename(link_text) then
+					vim.notify("Fetching image...", vim.log.levels.INFO)
+					image.download_file(best.href, auth, function(err, path)
+						if err or not path then
+							vim.notify("Image download failed: " .. (err or ""), vim.log.levels.ERROR)
+							return
+						end
+						if not vim.api.nvim_buf_is_valid(buf) then return end
+						image.show_hover(path, buf)
+					end, { ext = link_text:lower():match("%.(%w+)$") })
 					return
 				end
 			end

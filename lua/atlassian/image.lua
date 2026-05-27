@@ -41,6 +41,19 @@ function M.get_max_file_size()
     return 2 * 1024 * 1024 -- 2MB default
 end
 
+---@return number Terminal cell height/width ratio used to fit preview floats
+function M.get_cell_aspect()
+    local ok, cc = pcall(require, "confluence-interface.config")
+    if ok and cc.options and cc.options.image and cc.options.image.cell_aspect then
+        return cc.options.image.cell_aspect
+    end
+    local ok2, jc = pcall(require, "jira-interface.config")
+    if ok2 and jc.options and jc.options.image and jc.options.image.cell_aspect then
+        return jc.options.image.cell_aspect
+    end
+    return 2.0
+end
+
 ---@param url string
 ---@param auth table|nil Auth config
 ---@param cb fun(err: string|nil, path: string|nil)
@@ -123,9 +136,70 @@ function M.fetch_confluence_attachment(page_id, filename, cb)
     })
 end
 
+--- Download a resolved Jira attachment object, gating on the size limit.
+---@param att table Attachment { url, filename, size }
+---@param auth table
+---@param cb fun(err: string|nil, path: string|nil)
+local function download_jira_att(att, auth, cb)
+    if att.size and att.size > M.get_max_file_size() then
+        cb(nil, nil)
+        return
+    end
+    local ext = (att.filename or ""):match("%.(%w+)$") or ""
+    M.download_file(att.url, auth, cb, { ext = ext })
+end
+
+--- Build (and cache on the buffer) a map of media-services UUID -> attachment.
+--- Jira embeds images in ADF as `media` nodes keyed by a media-services UUID,
+--- which is not the attachment id. The attachment content endpoint 303-redirects
+--- to `.../file/<uuid>/binary`, so we probe each attachment to recover its UUID.
+---@param buf number
+---@param auth table
+---@param attachments table[] Parsed attachments with numeric `id`
+---@param cb fun(map: table<string, table>)
+function M.ensure_jira_media_map(buf, auth, attachments, cb)
+    if vim.b[buf] and vim.b[buf].atlassian_media_map then
+        cb(vim.b[buf].atlassian_media_map)
+        return
+    end
+
+    local map = {}
+    local pending = #attachments
+    if pending == 0 then
+        cb(map)
+        return
+    end
+
+    local base_url = request.normalize_url(auth.url)
+    local auth_header = request.get_auth_header(auth)
+
+    for _, att in ipairs(attachments) do
+        local url = base_url .. "/rest/api/3/attachment/content/" .. att.id .. "?redirect=true"
+        local args = {
+            "curl", "-s", "-o", "/dev/null", "-w", "%{redirect_url}",
+            "-H", "Authorization: " .. auth_header, url,
+        }
+        vim.system(args, { text = true }, function(result)
+            vim.schedule(function()
+                local uuid = (result.stdout or ""):match("/file/([^/]+)/binary")
+                if uuid then
+                    map[uuid] = att
+                end
+                pending = pending - 1
+                if pending == 0 then
+                    if vim.api.nvim_buf_is_valid(buf) then
+                        vim.b[buf].atlassian_media_map = map
+                    end
+                    cb(map)
+                end
+            end)
+        end)
+    end
+end
+
 --- Fetch Jira attachment using stored attachment data from buffer variable
 ---@param buf number
----@param id_or_name string Attachment ID or filename
+---@param id_or_name string Attachment ID, filename, or ADF media-services UUID
 ---@param cb fun(err: string|nil, path: string|nil)
 function M.fetch_jira_attachment(buf, id_or_name, cb)
     local ok, jc = pcall(require, "jira-interface.config")
@@ -133,25 +207,26 @@ function M.fetch_jira_attachment(buf, id_or_name, cb)
         cb("Jira not configured", nil)
         return
     end
+    local auth = jc.options.auth
+    local attachments = (vim.b[buf] and vim.b[buf].atlassian_attachments) or {}
 
-    local attachments = vim.b[buf] and vim.b[buf].atlassian_attachments
-    if attachments then
-        for _, att in ipairs(attachments) do
-            if att.id == id_or_name or att.filename == id_or_name then
-                if att.size and att.size > M.get_max_file_size() then
-                    cb(nil, nil)
-                    return
-                end
-                local ext = (att.filename or ""):match("%.(%w+)$") or ""
-                M.download_file(att.url, jc.options.auth, cb, { ext = ext })
-                return
-            end
+    -- Direct match by attachment id or filename (covers ADF `alt` set to filename)
+    for _, att in ipairs(attachments) do
+        if att.id == id_or_name or att.filename == id_or_name then
+            download_jira_att(att, auth, cb)
+            return
         end
     end
 
-    local base_url = request.normalize_url(jc.options.auth.url)
-    local download_url = base_url .. "/rest/api/3/attachment/content/" .. id_or_name
-    M.download_file(download_url, jc.options.auth, cb)
+    -- Resolve an ADF `media` node's media-services UUID to its attachment.
+    M.ensure_jira_media_map(buf, auth, attachments, function(map)
+        local att = map[id_or_name]
+        if att then
+            download_jira_att(att, auth, cb)
+        else
+            cb("Attachment not found: " .. id_or_name, nil)
+        end
+    end)
 end
 
 ---@param url string Direct URL for ri:url images
@@ -182,13 +257,15 @@ end
 local IMAGE_EXTS = { png = true, jpg = true, jpeg = true, gif = true, bmp = true, webp = true, svg = true, tiff = true }
 local PDF_EXTS = { pdf = true }
 
---- Convert first page of a PDF to PNG via magick CLI. Result is cached.
+--- Convert a single PDF page to PNG via the ImageMagick CLI. Cached per page.
 ---@param pdf_path string Local path to the PDF file
+---@param page number 0-indexed page number
 ---@param cb fun(err: string|nil, png_path: string|nil)
-function M.convert_pdf_to_png(pdf_path, cb)
+function M.convert_pdf_to_png(pdf_path, page, cb)
+    page = page or 0
     local cache_dir = M.get_cache_dir()
     local hash = vim.fn.sha256(pdf_path):sub(1, 16)
-    local png_path = cache_dir .. "/" .. hash .. "_p1.png"
+    local png_path = cache_dir .. "/" .. hash .. "_v3_p" .. (page + 1) .. ".png"
 
     if vim.fn.filereadable(png_path) == 1 then
         cb(nil, png_path)
@@ -196,10 +273,11 @@ function M.convert_pdf_to_png(pdf_path, cb)
     end
 
     vim.fn.mkdir(cache_dir, "p")
-    -- ImageMagick 7 uses "magick", ImageMagick 6 uses "convert"
+    -- ImageMagick 7 uses "magick", ImageMagick 6 uses "convert".
+    -- `-density` must precede the input to set the PDF rasterization resolution.
     local cmd = vim.fn.executable("magick") == 1 and "magick" or "convert"
     vim.system(
-        { cmd, pdf_path .. "[0]", "-density", "150", "-background", "white", "-alpha", "remove", png_path },
+        { cmd, "-density", "150", pdf_path .. "[" .. page .. "]", "-background", "white", "-alpha", "remove", png_path },
         { text = false },
         function(result)
             vim.schedule(function()
@@ -217,6 +295,26 @@ function M.convert_pdf_to_png(pdf_path, cb)
     )
 end
 
+--- Count the pages in a PDF. Prefers pdfinfo, falls back to ImageMagick.
+---@param pdf_path string
+---@param cb fun(count: number)
+function M.pdf_page_count(pdf_path, cb)
+    if vim.fn.executable("pdfinfo") == 1 then
+        vim.system({ "pdfinfo", pdf_path }, { text = true }, function(r)
+            vim.schedule(function()
+                cb(tonumber((r.stdout or ""):match("Pages:%s*(%d+)")) or 1)
+            end)
+        end)
+        return
+    end
+    local cmd = vim.fn.executable("magick") == 1 and "magick" or "convert"
+    vim.system({ cmd, "identify", "-format", "%n\n", pdf_path }, { text = true }, function(r)
+        vim.schedule(function()
+            cb(tonumber((r.stdout or ""):match("(%d+)")) or 1)
+        end)
+    end)
+end
+
 --- Check if a filename is a previewable document (PDF)
 ---@param name string
 ---@return boolean
@@ -228,10 +326,11 @@ end
 --- Check if a filename has an image extension
 ---@param name string
 ---@return boolean
-local function is_image_filename(name)
+function M.is_image_filename(name)
     local ext = name:lower():match("%.(%w+)$")
     return ext and IMAGE_EXTS[ext] or false
 end
+local is_image_filename = M.is_image_filename
 
 --- Fetch an image reference, dispatching to the right backend
 ---@param buf number
@@ -299,6 +398,10 @@ end
 --- Close current hover float
 function M.hover_close()
     if hover then
+        if hover.pdf and hover.pdf.keys and hover.buf and vim.api.nvim_buf_is_valid(hover.buf) then
+            pcall(vim.keymap.del, "n", "]", { buffer = hover.buf })
+            pcall(vim.keymap.del, "n", "[", { buffer = hover.buf })
+        end
         if hover.placement then
             pcall(function() hover.placement:close() end)
         end
@@ -312,10 +415,100 @@ function M.hover_close()
     end
 end
 
---- Show image hover float in top-right corner
+--- Read pixel dimensions from a PNG header (no external dependency).
+---@param path string
+---@return number|nil w, number|nil h
+local function read_png_size(path)
+    local f = io.open(path, "rb")
+    if not f then return nil end
+    local data = f:read(24)
+    f:close()
+    if not data or #data < 24 or data:sub(1, 8) ~= "\137PNG\r\n\26\n" then
+        return nil
+    end
+    local function be32(o)
+        local a, b, c, d = data:byte(o, o + 3)
+        return ((a * 256 + b) * 256 + c) * 256 + d
+    end
+    -- 8-byte signature, 4-byte length, "IHDR", then width(4) and height(4).
+    return be32(17), be32(21)
+end
+
+--- Read pixel dimensions from a JPEG by scanning to the Start-of-Frame marker.
+---@param path string
+---@return number|nil w, number|nil h
+local function read_jpeg_size(path)
+    local f = io.open(path, "rb")
+    if not f then return nil end
+    if f:read(2) ~= "\255\216" then -- SOI (FF D8)
+        f:close()
+        return nil
+    end
+    while true do
+        local b = f:read(1)
+        if not b then break end
+        if b == "\255" then
+            local m = f:read(1)
+            while m == "\255" do m = f:read(1) end -- skip fill bytes
+            if not m then break end
+            local marker = m:byte()
+            -- Standalone markers (no length): SOI/EOI, RST0-7, TEM.
+            if marker == 0xD8 or marker == 0xD9 or (marker >= 0xD0 and marker <= 0xD7) or marker == 0x01 then
+            -- luacheck: ignore (intentionally fall through to next marker)
+            else
+                local lenb = f:read(2)
+                if not lenb or #lenb < 2 then break end
+                local len = lenb:byte(1) * 256 + lenb:byte(2)
+                -- SOF markers carry dimensions: C0-CF except C4(DHT), C8(JPG), CC(DAC).
+                if marker >= 0xC0 and marker <= 0xCF
+                    and marker ~= 0xC4 and marker ~= 0xC8 and marker ~= 0xCC then
+                    local sof = f:read(5) -- precision(1), height(2), width(2)
+                    f:close()
+                    if not sof or #sof < 5 then return nil end
+                    return sof:byte(4) * 256 + sof:byte(5), sof:byte(2) * 256 + sof:byte(3)
+                end
+                f:seek("cur", len - 2) -- skip this segment's payload
+            end
+        end
+    end
+    f:close()
+    return nil
+end
+
+--- Read pixel dimensions of a PNG or JPEG image (by content, not extension).
+---@param path string
+---@return number|nil w, number|nil h
+local function read_image_size(path)
+    local w, h = read_png_size(path)
+    if w then return w, h end
+    return read_jpeg_size(path)
+end
+
+--- Float window size (in cells) fitted to an image's aspect ratio, within bounds.
+---@param path string Local image path
+---@return number cols, number rows
+local function fit_dims(path)
+    local max_w = math.min(80, math.floor(vim.o.columns * 0.45))
+    local max_h = math.floor(vim.o.lines * 0.9)
+    local w, h = read_image_size(path)
+    if not (w and h and w > 0 and h > 0) then
+        return max_w, max_h
+    end
+    local cell_aspect = M.get_cell_aspect()
+    local cols = max_w
+    local rows = math.floor(cols * (h / w) / cell_aspect + 0.5)
+    if rows > max_h then
+        rows = max_h
+        cols = math.floor(rows * (w / h) * cell_aspect + 0.5)
+    end
+    return math.max(cols, 10), math.max(rows, 3)
+end
+
+--- Show an image hover float in the top-right corner, fitted to the image.
 ---@param path string Local cached image path
 ---@param source_buf number The document buffer
-function M.show_hover(path, source_buf)
+---@param opts? { title?: string }
+function M.show_hover(path, source_buf, opts)
     if hover and hover.src == path then return end
 
     M.hover_close()
@@ -323,28 +516,30 @@ function M.show_hover(path, source_buf)
     local backend = detect_backend()
     if not backend then return end
 
-    local max_w = math.min(80, math.floor(vim.o.columns * 0.4))
-    local max_h = math.floor(vim.o.lines * 0.9)
+    local width, height = fit_dims(path)
+    local title = opts and opts.title
 
     local float_buf = vim.api.nvim_create_buf(false, true)
     vim.bo[float_buf].bufhidden = "wipe"
 
     local lines = {}
-    for _ = 1, max_h do
+    for _ = 1, height do
         table.insert(lines, "")
     end
     vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, lines)
 
     local win = vim.api.nvim_open_win(float_buf, false, {
         relative = "editor",
-        width = max_w,
-        height = max_h,
+        width = width,
+        height = height,
         row = 1,
-        col = vim.o.columns - max_w - 1,
+        col = vim.o.columns - width - 1,
         style = "minimal",
         border = "rounded",
         focusable = false,
         zindex = 50,
+        title = title,
+        title_pos = title and "center" or nil,
     })
 
     hover = {
@@ -358,8 +553,8 @@ function M.show_hover(path, source_buf)
         hover.placement = Snacks.image.placement.new(float_buf, path, {
             pos = { 1, 0 },
             inline = true,
-            max_width = max_w,
-            max_height = max_h,
+            max_width = width,
+            max_height = height,
         })
     elseif backend == "image_nvim" then
         local image = require("image")
@@ -369,14 +564,68 @@ function M.show_hover(path, source_buf)
             with_virtual_padding = true,
             x = 0,
             y = 0,
-            width = max_w,
-            height = max_h,
+            width = width,
+            height = height,
         })
         if img then
             img:render()
             hover.image_obj = img
         end
     end
+end
+
+--- Render a PDF page into the hover float and wire up page navigation.
+---@param pdf_path string
+---@param source_buf number
+---@param png_path string Rendered page image
+---@param page number 0-indexed
+---@param total number
+local function show_pdf_page(pdf_path, source_buf, png_path, page, total)
+    local title = total > 1 and string.format(" PDF %d/%d   [ prev · ] next ", page + 1, total) or nil
+    M.show_hover(png_path, source_buf, { title = title })
+    if not hover then return end
+    hover.pdf = { path = pdf_path, page = page, total = total }
+    if total > 1 then
+        vim.keymap.set("n", "]", function() M.pdf_page(1) end,
+            { buffer = source_buf, desc = "PDF preview: next page" })
+        vim.keymap.set("n", "[", function() M.pdf_page(-1) end,
+            { buffer = source_buf, desc = "PDF preview: previous page" })
+        hover.pdf.keys = true
+    end
+end
+
+--- Turn the currently previewed PDF by `delta` pages (rendered on demand).
+---@param delta number
+function M.pdf_page(delta)
+    if not (hover and hover.pdf) then return end
+    local p = hover.pdf
+    local new_page = p.page + delta
+    if new_page < 0 or new_page >= p.total then return end
+    local pdf_path, source_buf, total = p.path, hover.buf, p.total
+    M.convert_pdf_to_png(pdf_path, new_page, function(err, png_path)
+        if err or not png_path then
+            vim.notify("PDF page render failed: " .. (err or ""), vim.log.levels.ERROR)
+            return
+        end
+        if not vim.api.nvim_buf_is_valid(source_buf) then return end
+        show_pdf_page(pdf_path, source_buf, png_path, new_page, total)
+    end)
+end
+
+--- Preview a downloaded PDF with fitted dimensions and page navigation.
+---@param pdf_path string Local path to the PDF
+---@param source_buf number The document buffer
+function M.show_pdf(pdf_path, source_buf)
+    M.pdf_page_count(pdf_path, function(total)
+        M.convert_pdf_to_png(pdf_path, 0, function(err, png_path)
+            if err or not png_path then
+                vim.notify("PDF convert failed: " .. (err or ""), vim.log.levels.ERROR)
+                return
+            end
+            if not vim.api.nvim_buf_is_valid(source_buf) then return end
+            show_pdf_page(pdf_path, source_buf, png_path, 0, total)
+        end)
+    end)
 end
 
 --- Attach hover autocmds to a CSF buffer

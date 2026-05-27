@@ -49,6 +49,7 @@ M.defaults = {
         max_file_size = 2 * 1024 * 1024,  -- 2MB
         auto_preview = false,              -- true = CursorHold preview
         cache_dir = vim.fn.stdpath("cache") .. "/atlassian/images",
+        cell_aspect = 2.0,                 -- terminal cell height/width ratio (tune to fit previews)
     },
     math = {
         enabled = true,
