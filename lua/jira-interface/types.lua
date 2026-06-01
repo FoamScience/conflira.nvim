@@ -50,6 +50,8 @@ local atlassian_adf = require("atlassian.adf")
 ---@field duedate string|nil Due date (YYYY-MM-DD)
 ---@field created string Created timestamp
 ---@field updated string Updated timestamp
+---@field labels string[] Issue labels
+---@field fix_versions string[] Fix Version/s names (release / cycle)
 
 ---@class JiraTransition
 ---@field id string Transition ID
@@ -165,7 +167,39 @@ function M.parse_issue(raw)
         duedate = type(fields.duedate) == "string" and fields.duedate or nil,
         created = fields.created or "",
         updated = fields.updated or "",
+        labels = M.parse_labels(fields.labels),
+        fix_versions = M.parse_fix_versions(fields.fixVersions),
     }
+end
+
+---@param labels any The fields.labels array from Jira API
+---@return string[]
+function M.parse_labels(labels)
+    local result = {}
+    if not is_table(labels) then
+        return result
+    end
+    for _, label in ipairs(labels) do
+        if type(label) == "string" then
+            result[#result + 1] = label
+        end
+    end
+    return result
+end
+
+---@param versions any The fields.fixVersions array from Jira API
+---@return string[]
+function M.parse_fix_versions(versions)
+    local result = {}
+    if not is_table(versions) then
+        return result
+    end
+    for _, v in ipairs(versions) do
+        if is_table(v) and type(v.name) == "string" then
+            result[#result + 1] = v.name
+        end
+    end
+    return result
 end
 
 ---@param attachments any
@@ -283,16 +317,35 @@ function M.parse_description(description)
     return nil
 end
 
---- Find a custom_fields entry by heading (case-insensitive)
+--- Find a custom_fields entry by heading.
+--- Exact (case-insensitive) match first; falls back to a fuzzy match where every
+--- word in the pattern appears somewhere in the heading (e.g. "acceptance criteria"
+--- matches a field named "Acceptance Criteria (DoD)").
 ---@param heading_pattern string
 ---@return string[] candidate field IDs
 local function find_custom_field_candidates(heading_pattern)
     local pattern = heading_pattern:lower()
-    for heading, field_ref in pairs(config.options.custom_fields or {}) do
+    local custom = config.options.custom_fields or {}
+
+    for heading, field_ref in pairs(custom) do
         if heading:lower() == pattern then
             return type(field_ref) == "table" and field_ref or { field_ref }
         end
     end
+
+    local words = {}
+    for w in pattern:gmatch("%S+") do words[#words + 1] = w end
+    for heading, field_ref in pairs(custom) do
+        local hl = heading:lower()
+        local all = #words > 0
+        for _, w in ipairs(words) do
+            if not hl:find(w, 1, true) then all = false; break end
+        end
+        if all then
+            return type(field_ref) == "table" and field_ref or { field_ref }
+        end
+    end
+
     return {}
 end
 

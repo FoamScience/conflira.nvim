@@ -47,11 +47,12 @@ function M.check()
         health.info("JIRA_PROJECT: (not set - will search all projects)")
     end
 
-    -- Check custom fields
+    -- Check custom fields (values may be a single ID or a list of candidate IDs)
     local cf = opts.custom_fields or {}
     if not vim.tbl_isempty(cf) then
-        for heading, field_id in pairs(cf) do
-            health.ok("Custom field: " .. heading .. " → " .. field_id)
+        for heading, field_ref in pairs(cf) do
+            local ids = type(field_ref) == "table" and table.concat(field_ref, ", ") or tostring(field_ref)
+            health.ok("Custom field: " .. heading .. " → " .. ids)
         end
     else
         health.info("No custom fields configured")

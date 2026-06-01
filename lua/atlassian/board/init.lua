@@ -18,16 +18,12 @@ local function build_involvement_jql(callback)
 		local clauses = { "assignee = currentUser()" }
 
 		local custom = config.options.custom_fields or {}
-		local resolved = api._resolved_custom_fields or {}
 
-		for heading, _ in pairs(custom) do
+		for heading, ids in pairs(custom) do
 			local lower = heading:lower()
 			if lower:find("review") or lower:find("additional") or lower:find("assignee") then
-				local ids = resolved[heading]
-				if ids then
-					for _, id in ipairs(type(ids) == "table" and ids or { ids }) do
-						table.insert(clauses, '"' .. id .. '" = currentUser()')
-					end
+				for _, id in ipairs(type(ids) == "table" and ids or { ids }) do
+					table.insert(clauses, '"' .. id .. '" = currentUser()')
 				end
 			end
 		end
@@ -48,19 +44,6 @@ local function build_involvement_jql(callback)
 		local jql = involvement .. exclude .. " ORDER BY updated DESC"
 		callback(jql)
 	end)
-end
-
---- Detect which custom_fields heading is the product area.
----@return string|nil
-local function detect_product_area_field()
-	local config = require("jira-interface.config")
-	for heading, _ in pairs(config.options.custom_fields or {}) do
-		local lower = heading:lower()
-		if lower:find("product") or lower:find("area") or lower:find("component") or lower:find("team") then
-			return heading
-		end
-	end
-	return nil
 end
 
 --- Fetch parent issues not in the result set (context bubbling).
@@ -197,10 +180,11 @@ function M.show(issues, project, jql, force_group)
 	vim.wo[win].signcolumn = "yes:1"
 	vim.wo[win].cursorline = true
 
-	local product_area_field = detect_product_area_field()
-	local tree = state_mod.build_tree(issues, nil)
-	local group_mode = force_group or (product_area_field and "product_area" or "none")
-	local groups = state_mod.group_nodes(tree, group_mode, product_area_field)
+	local config = require("jira-interface.config")
+	local done_filter = config.options.board and config.options.board.done_filter or "leaves"
+	local tree = state_mod.filter_for_display(state_mod.build_tree(issues, nil), done_filter)
+	local group_mode = force_group or "none"
+	local groups = state_mod.group_nodes(tree, group_mode)
 
 	board = {
 		buf = buf,
@@ -216,7 +200,6 @@ function M.show(issues, project, jql, force_group)
 		jql = jql,
 		project = project,
 		my_account_id = nil,
-		product_area_field = product_area_field,
 	}
 
 	M.refresh_render()
@@ -312,7 +295,7 @@ end
 local function set_group_mode(mode)
 	if not board then return end
 	board.group_mode = mode
-	board.groups = state_mod.group_nodes(board.tree, mode, board.product_area_field)
+	board.groups = state_mod.group_nodes(board.tree, mode)
 	M.refresh_render()
 	vim.api.nvim_win_set_cursor(0, { 1, 0 })
 end
@@ -388,7 +371,15 @@ function M.setup_keymaps(buf)
 		local node = node_at_cursor()
 		if node then
 			local ui = require("jira-interface.ui")
-			ui.show_transition_picker(node.issue.key, node.issue.status)
+			ui.show_transition_picker(node.issue.key, node.issue.status, function(new_status)
+				vim.schedule(function()
+					if not board then return end
+					node.issue.status = new_status
+					node.urgency = state_mod.compute_urgency(node.issue)
+					board.groups = state_mod.group_nodes(board.tree, board.group_mode)
+					M.refresh_render()
+				end)
+			end)
 		end
 	end, opts("Transition status"))
 
@@ -426,7 +417,8 @@ function M.setup_keymaps(buf)
 	-- Grouping
 	vim.keymap.set("n", "gs", function() set_group_mode("status") end, opts("Group by status"))
 	vim.keymap.set("n", "ga", function() set_group_mode("assignee") end, opts("Group by assignee"))
-	vim.keymap.set("n", "gp", function() set_group_mode("product_area") end, opts("Group by product area"))
+	vim.keymap.set("n", "gk", function() set_group_mode("kind") end, opts("Group by epic kind"))
+	vim.keymap.set("n", "gc", function() set_group_mode("cycle") end, opts("Group by cycle"))
 	vim.keymap.set("n", "gt", function() set_group_mode("type") end, opts("Group by type"))
 	vim.keymap.set("n", "gd", function() set_group_mode("due") end, opts("Group by due date"))
 	vim.keymap.set("n", "gi", function() set_group_mode("priority") end, opts("Group by priority"))
@@ -458,6 +450,13 @@ function M.setup_keymaps(buf)
 		add("Epics", filters.builtin.by_level(1, project))
 		add("Features / Bugs", filters.builtin.by_level(2, project))
 		add("Tasks", filters.builtin.by_level(3, project))
+
+		-- Epic-kind label presets (Shape Up structure)
+		local epic_kinds = config.options.board and config.options.board.epic_kinds or {}
+		for label, entry in pairs(epic_kinds) do
+			add(entry.icon .. " " .. entry.name, filters.builtin.by_label(label, project))
+		end
+
 		add("Overdue", filters.builtin.overdue(project))
 		add("Due this week", filters.builtin.due_this_week(project))
 		add("Due soon (7 days)", filters.builtin.due_soon(project))
@@ -542,7 +541,8 @@ function M.setup_keymaps(buf)
 			"  gx    Open in browser",
 			"  gs    Group by status",
 			"  ga    Group by assignee",
-			"  gp    Group by product area",
+			"  gk    Group by epic kind",
+			"  gc    Group by cycle",
 			"  gi    Group by priority",
 			"  gd    Group by due date",
 			"  gt    Group by type",

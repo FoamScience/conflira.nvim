@@ -101,6 +101,17 @@ function M.builtin.by_level(level, project)
     return jql .. " ORDER BY updated DESC"
 end
 
+---@param label string
+---@param project? string
+---@return string
+function M.builtin.by_label(label, project)
+    local jql = string.format('labels = "%s"', label)
+    if project and project ~= "" then
+        jql = jql .. " AND project = " .. project
+    end
+    return jql .. " ORDER BY updated DESC"
+end
+
 ---@param parent_key string
 ---@return string
 function M.builtin.children_of(parent_key)

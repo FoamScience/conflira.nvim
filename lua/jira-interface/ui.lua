@@ -309,7 +309,7 @@ function M.view(key)
 end
 
 ---@param key string
-function M.show_transition_picker(key, current_status)
+function M.show_transition_picker(key, current_status, on_success)
     api.get_transitions(key, function(err, transitions)
         if err then
             notify.error("Failed to get transitions: " .. err)
@@ -361,11 +361,13 @@ function M.show_transition_picker(key, current_status)
                                 notify.error("Transition failed: " .. trans_err)
                             else
                                 notify.info(string.format("%s -> %s", key, t.to))
+                                if on_success then on_success(t.to) end
                             end
                         end)
                     else
                         local queue = require("jira-interface.queue")
                         queue.queue_transition(key, t.id, t.to)
+                        if on_success then on_success(t.to) end
                     end
                 end
             end,

@@ -52,7 +52,7 @@ local function build_fields_param()
     local field_list = {
         "summary", "description", "status", "issuetype", "project",
         "assignee", "parent", "attachment", "comment", "issuelinks",
-        "priority", "duedate", "created", "updated",
+        "priority", "duedate", "created", "updated", "labels", "fixVersions",
     }
     for _, value in pairs(config.options.custom_fields or {}) do
         if type(value) == "table" then
@@ -141,6 +141,46 @@ function M.ensure_custom_fields_resolved(callback)
                     custom[heading] = { configured }
                 end
             end
+        end
+
+        -- Auto-discover the Acceptance Criteria field by name — no config entry needed.
+        -- A field matches if its name contains all words of any configured alias.
+        local ac_aliases = config.options.acceptance_criteria_names or { "acceptance criteria" }
+        local function name_matches(name)
+            for _, alias in ipairs(ac_aliases) do
+                local all = true
+                for word in alias:lower():gmatch("%S+") do
+                    if not name:find(word, 1, true) then all = false; break end
+                end
+                if all then return true end
+            end
+            return false
+        end
+
+        local ac_ids = {}
+        local ac_seen = {}
+        for _, field in ipairs(fields) do
+            if field.custom and field.name then
+                if name_matches(field.name:lower()) and not ac_seen[field.id] then
+                    ac_seen[field.id] = true
+                    table.insert(ac_ids, field.id)
+                end
+            end
+        end
+        if #ac_ids > 0 then
+            -- Register under a canonical heading so type resolution finds it regardless
+            -- of the field's actual display name, merging with anything already present.
+            local existing = custom["Acceptance Criteria"]
+            local merged = {}
+            local seen = {}
+            local function push(id) if not seen[id] then seen[id] = true; merged[#merged + 1] = id end end
+            if type(existing) == "table" then
+                for _, id in ipairs(existing) do push(id) end
+            elseif type(existing) == "string" then
+                push(existing)
+            end
+            for _, id in ipairs(ac_ids) do push(id) end
+            custom["Acceptance Criteria"] = merged
         end
 
         callback()

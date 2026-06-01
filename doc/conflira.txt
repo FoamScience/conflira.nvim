@@ -31,7 +31,6 @@ Features:
   - Image and PDF preview (image.nvim / snacks.image)
   - Protocol handlers: `:edit jira://PROJ-123`
   - Slash commands (blink.cmp integration)
-  - CSF tree-sitter parser (legacy)
 
 ===========================================================================
 2. SETUP                                               *atlassian-setup*
@@ -79,6 +78,63 @@ strings in your config (they will end up in version control).
       default_space = "SPACE",
     })
 <
+
+Configuration Options ~
+                                                  *atlassian-setup-options*
+
+All keys are optional; defaults shown.  Pass only overrides to setup().
+
+  cache_ttl        300       Cache time-to-live (seconds)
+  max_results      500       Max issues fetched per query
+  since            "-365d"   Only issues created since; nil disables
+  types            ...       lvl1..lvl4 issue-type hierarchy
+  statuses         ...       Statuses for transition flows
+
+  acceptance_criteria_names  { "acceptance criteria" }
+                             Name fragments used to auto-discover the
+                             Acceptance Criteria field (all words must
+                             appear in the field name). No custom_fields
+                             entry is required for it.
+
+  custom_fields    {}        heading -> field ID(s). Only needed for
+                             non-rich-text fields; rich-text fields are
+                             auto-discovered by name.
+
+board.* options:
+
+  workable_jql     nil       Defines the "workable" set for the status
+                             bar; nil counts leaf nodes. The bar always
+                             counts the full fetched set, independent of
+                             done_filter.
+  done_filter      "leaves"  Which done issues to hide from the outline:
+                             "none" (show all), "trees" (hide only
+                             fully-done trees), "leaves" (also hide done
+                             leaf items and fully-done subtrees anywhere).
+  type_icons       ...       Per-type glyphs in the outline.
+  epic_kinds       ...       label -> { name, icon, hl }. Drives kind
+                             badges and `gk` grouping (Pillar / Shape Up
+                             Goal / Operational). {} disables.
+  cycle_pattern    "SU%d+/%d+"
+                             Lua pattern for the Shape Up cycle id
+                             (summary, then fix versions). Drives cycle
+                             tags and `gc` grouping. nil disables.
+  rules            {}        Issue rules: named boolean predicates over
+                             an issue, usable by ANY board concept (not
+                             just readiness). id = function(node) -> bool;
+                             node.issue is the JiraIssue, node.children are
+                             child nodes. Custom ids override built-ins.
+                             Built-in ids: description, acceptance_criteria,
+                             child_task, fix_version, epic_link, assignee.
+  readiness        ...       Definition-of-Ready overlay (checkmark
+                             ready / shaping) — one consumer of board.rules.
+                             readiness.enabled toggles it.
+                             readiness.levels[N] lists the rule ids that
+                             must ALL pass for level N. See the README
+                             "Issue Rules" section for details.
+
+display.*, image.*, math.* control the editor windows, image/PDF
+preview, and LaTeX macros respectively; see the README for their
+full shape and defaults.
 
 ===========================================================================
 3. JIRA INTERFACE                                        *atlassian-jira*
@@ -179,7 +235,8 @@ These mappings are available in the outline board buffer:
   Key           Action ~
   gs            Group by status
   ga            Group by assignee
-  gp            Group by product area
+  gk            Group by epic kind (Pillar/Shape Up Goal/Operational)
+  gc            Group by Shape Up cycle (e.g. SU1/26)
   gi            Group by priority (Highest → Lowest)
   gd            Group by due date
   gt            Group by type

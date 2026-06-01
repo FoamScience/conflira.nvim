@@ -72,7 +72,50 @@ M.defaults = {
             Task = "◇",
             ["Sub-Task"] = "○",
         },
+        -- Epic kinds, distinguished by label (Shape Up structure).
+        -- label → { name, icon, hl }. Set to {} to disable kind badges/grouping.
+        epic_kinds = {
+            pillar = { name = "Pillar", icon = "▲", hl = "@markup.heading.1" },
+            ["shape-up-goal"] = { name = "Shape Up Goal", icon = "◈", hl = "@markup.heading.2" },
+            operational = { name = "Operational", icon = "⚙", hl = "Comment" },
+        },
+        -- Lua pattern matching a Shape Up cycle identifier (e.g. "SU1/26").
+        -- Matched against the summary first, then fix version names. nil disables.
+        cycle_pattern = "SU%d+/%d+",
+
+        -- Issue rules: named boolean predicates over an issue, usable by ANY
+        -- board concept (readiness today; more later). See
+        -- lua/atlassian/board/rules.lua. Each is `id = function(node) -> boolean`
+        -- where node.issue is the JiraIssue and node.children are child nodes.
+        -- Custom ids override built-ins of the same name.
+        --
+        -- Built-in rule ids:
+        --   "description"         non-empty description
+        --   "acceptance_criteria" non-empty Acceptance Criteria field
+        --                         (auto-discovered by name; no custom_fields entry needed)
+        --   "child_task"          has ≥1 child in the tree
+        --   "fix_version"         has ≥1 Fix Version/s (release / cycle)
+        --   "epic_link"           has a parent (linked to an Epic)
+        --   "assignee"            has an assignee
+        rules = {},
+
+        -- Definition-of-Ready overlay (Shape Up "ready for development" bar) —
+        -- one consumer of the rules above. enabled → show ✓ready / ◐shaping on
+        -- workable items. levels[N] lists the rule ids that must ALL pass for an
+        -- item at hierarchy level N.
+        readiness = {
+            enabled = true,
+            levels = {
+                [2] = { "description", "acceptance_criteria", "child_task", "fix_version", "epic_link" },
+                [3] = { "description" },
+            },
+        },
     },
+    -- Display-name fragments used to auto-discover the Acceptance Criteria field
+    -- from Jira field metadata. A custom field matches if its name contains all
+    -- words of any entry here (case-insensitive). Add aliases like
+    -- "definition of done" to match differently-named fields.
+    acceptance_criteria_names = { "acceptance criteria" },
     custom_fields = {},
     data_dir = vim.fn.stdpath("data") .. "/jira-interface",
     templates = {},

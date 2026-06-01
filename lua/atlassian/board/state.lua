@@ -19,14 +19,13 @@ local M = {}
 ---@field issues JiraIssue[]
 ---@field tree BoardNode[]
 ---@field groups BoardGroup[]
----@field group_mode string "product_area"|"status"|"assignee"|"type"|"none"
+---@field group_mode string "status"|"assignee"|"type"|"priority"|"due"|"kind"|"cycle"|"none"
 ---@field line_to_node table<number, BoardNode>
 ---@field line_count number
 ---@field filters table
 ---@field jql string
 ---@field project string
 ---@field my_account_id string|nil
----@field product_area_field string|nil
 
 ---@param issues JiraIssue[]
 ---@param my_account_id string|nil
@@ -118,15 +117,94 @@ function M.build_tree(issues, my_account_id)
 		return a.issue.key < b.issue.key
 	end)
 
-	-- Filter out fully-done trees (feature + all children done)
-	local filtered = {}
-	for _, node in ipairs(roots) do
-		if not M.is_fully_done(node) then
-			filtered[#filtered + 1] = node
+	return roots
+end
+
+--- Filter a tree for display according to the configured done_filter mode.
+--- Counting for the status bar is independent (see M.workable_stats), so hiding
+--- done items here does not skew progress.
+---   "none"   → show everything
+---   "trees"  → hide only fully-done trees (root + all descendants done)
+---   "leaves" → also hide done leaf nodes and fully-done subtrees at any level
+---@param roots BoardNode[]
+---@param mode string|nil
+---@return BoardNode[]
+function M.filter_for_display(roots, mode)
+	mode = mode or "leaves"
+	if mode == "none" then
+		return roots
+	end
+
+	if mode == "trees" then
+		local out = {}
+		for _, node in ipairs(roots) do
+			if not M.is_fully_done(node) then
+				out[#out + 1] = node
+			end
+		end
+		return out
+	end
+
+	-- "leaves": bottom-up — drop any node that is done and has no (remaining)
+	-- children. This removes done leaves and collapses fully-done subtrees.
+	local function prune(nodes)
+		local out = {}
+		for _, node in ipairs(nodes) do
+			node.children = prune(node.children)
+			local done_leaf = node.urgency == "done" and #node.children == 0
+			if not done_leaf then
+				out[#out + 1] = node
+			end
+		end
+		return out
+	end
+	return prune(roots)
+end
+
+--- Status-bar stats over the flat fetched issue list (independent of display
+--- filtering). "workable" = leaf issues (no children in the fetched set), or the
+--- type set named in board.workable_jql when configured.
+---@param issues JiraIssue[]
+---@return number total, table<string, number> status_counts, number done_count
+function M.workable_stats(issues)
+	local config = require("jira-interface.config")
+	local workable_jql = config.options.board and config.options.board.workable_jql
+
+	local workable_set = nil
+	if workable_jql then
+		workable_set = {}
+		for name in workable_jql:gmatch('"([^"]+)"') do
+			workable_set[name:lower()] = true
+		end
+		if not next(workable_set) then workable_set = nil end
+	end
+
+	local by_key, has_child = {}, {}
+	for _, issue in ipairs(issues) do by_key[issue.key] = true end
+	for _, issue in ipairs(issues) do
+		if issue.parent and by_key[issue.parent] then has_child[issue.parent] = true end
+	end
+
+	local total, done_count, status_counts = 0, 0, {}
+	for _, issue in ipairs(issues) do
+		local is_workable
+		if workable_set then
+			is_workable = workable_set[(issue.type or ""):lower()]
+		else
+			is_workable = not has_child[issue.key]
+		end
+		if is_workable then
+			total = total + 1
+			local s = issue.status or "Unknown"
+			status_counts[s] = (status_counts[s] or 0) + 1
+			local sl = s:lower()
+			if sl:find("done") or sl:find("resolved") or sl:find("closed") then
+				done_count = done_count + 1
+			end
 		end
 	end
 
-	return filtered
+	return total, status_counts, done_count
 end
 
 ---@param node BoardNode
@@ -152,6 +230,18 @@ function M.compute_urgency(issue)
 	end
 	if status:find("done") or status:find("resolved") or status:find("closed") then
 		return "done"
+	end
+
+	-- Link-derived blocked: an "is blocked by" link to a non-done issue.
+	for _, link in ipairs(issue.links or {}) do
+		local is_blocked_by = (link.label or ""):lower():find("blocked by")
+			or (link.link_type == "Blocks" and link.direction == "inward")
+		if is_blocked_by then
+			local ls = (link.issue_status or ""):lower()
+			if not (ls:find("done") or ls:find("resolved") or ls:find("closed")) then
+				return "blocked"
+			end
+		end
 	end
 
 	if issue.duedate then
@@ -223,11 +313,61 @@ function M.urgency_rank(urgency)
 	return urgency_order[urgency] or 4
 end
 
+--- Resolve the configured epic kind for an issue from its labels.
+---@param issue JiraIssue
+---@return table|nil { name, icon, hl }, string|nil label
+function M.epic_kind(issue)
+	local config = require("jira-interface.config")
+	local kinds = config.options.board and config.options.board.epic_kinds
+	if not kinds then return nil end
+	for _, label in ipairs(issue.labels or {}) do
+		local entry = kinds[label]
+		if entry then return entry, label end
+	end
+	return nil
+end
+
+--- Extract a Shape Up cycle identifier from an issue (summary, then fix versions).
+---@param issue JiraIssue
+---@return string|nil
+function M.cycle_id(issue)
+	local config = require("jira-interface.config")
+	local pattern = config.options.board and config.options.board.cycle_pattern
+	if not pattern then return nil end
+	local from_summary = issue.summary and issue.summary:match(pattern)
+	if from_summary then return from_summary end
+	for _, v in ipairs(issue.fix_versions or {}) do
+		local m = v:match(pattern)
+		if m then return m end
+		-- Fix version name may itself be the cycle id (e.g. "SU1/26")
+		if v ~= "" then return v end
+	end
+	return nil
+end
+
+--- Evaluate definition-of-readiness for a node.
+--- Readiness is a set of issue rules (see atlassian.board.rules) that must all
+--- pass for the item's hierarchy level.
+---@param node BoardNode
+---@return string|nil "ready"|"shaping" (nil when disabled / not applicable / done)
+function M.readiness(node)
+	local config = require("jira-interface.config")
+	local cfg = config.options.board and config.options.board.readiness
+	if not cfg or not cfg.enabled then return nil end
+	if node.urgency == "done" then return nil end
+
+	local rules = require("atlassian.board.rules")
+	rules.load_user_rules()
+	local ids = cfg.levels and cfg.levels[node.issue.level]
+	local result = rules.all_pass(ids, node)
+	if result == nil then return nil end
+	return result and "ready" or "shaping"
+end
+
 ---@param nodes BoardNode[]
 ---@param mode string
----@param product_area_field string|nil
 ---@return BoardGroup[]
-function M.group_nodes(nodes, mode, product_area_field)
+function M.group_nodes(nodes, mode)
 	if mode == "none" then
 		return { { name = "", nodes = nodes } }
 	end
@@ -270,17 +410,11 @@ function M.group_nodes(nodes, mode, product_area_field)
 					key = "No due date"
 				end
 			end
-		elseif mode == "product_area" and product_area_field then
-			local raw = (node.issue.custom_fields_raw or {})[product_area_field]
-			if type(raw) == "string" then
-				key = raw
-			elseif type(raw) == "table" and raw.value then
-				key = raw.value
-			elseif type(raw) == "table" and raw.name then
-				key = raw.name
-			else
-				key = "Uncategorized"
-			end
+		elseif mode == "kind" then
+			local entry = M.epic_kind(node.issue)
+			key = entry and entry.name or "Unclassified"
+		elseif mode == "cycle" then
+			key = M.cycle_id(node.issue) or "No cycle"
 		else
 			key = "All"
 		end

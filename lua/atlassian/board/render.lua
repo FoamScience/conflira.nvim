@@ -112,50 +112,9 @@ function M.render(board_state)
 		marks[#marks + 1] = { line = l, col = col, opts = opts }
 	end
 
-	-- Summary bar — count "workable" items
-	-- If board.workable_jql is set, parse type names from it.
-	-- Default: leaf nodes (issues with no children in the tree).
-	local config = require("jira-interface.config")
-	local workable_jql = config.options.board and config.options.board.workable_jql
-
-	local workable_set = nil
-	if workable_jql then
-		-- Extract type names from JQL like 'issuetype in ("Task", "Bug")'
-		workable_set = {}
-		for name in workable_jql:gmatch('"([^"]+)"') do
-			workable_set[name:lower()] = true
-		end
-		if not next(workable_set) then workable_set = nil end
-	end
-
-	local total = 0
-	local status_counts = {}
-	local done_count = 0
-
-	local function count_workable(nodes)
-		for _, node in ipairs(nodes) do
-			local is_workable
-			if workable_set then
-				is_workable = workable_set[(node.issue.type or ""):lower()]
-			else
-				is_workable = #node.children == 0
-			end
-
-			if is_workable then
-				total = total + 1
-				local s = node.issue.status or "Unknown"
-				status_counts[s] = (status_counts[s] or 0) + 1
-				local sl = s:lower()
-				if sl:find("done") or sl:find("resolved") or sl:find("closed") then
-					done_count = done_count + 1
-				end
-			end
-			if #node.children > 0 then
-				count_workable(node.children)
-			end
-		end
-	end
-	count_workable(board_state.tree)
+	-- Summary bar — count "workable" items over the full fetched set, independent
+	-- of the board.done_filter display mode (so hiding done items doesn't skew %).
+	local total, status_counts, done_count = state_mod.workable_stats(board_state.issues or {})
 
 	local pct = total > 0 and math.floor(done_count / total * 100) or 0
 	local filled = total > 0 and math.floor((done_count / total) * 10) or 0
@@ -319,15 +278,19 @@ function render_node(lines, marks, line_to_node, node, depth, is_last, ancestors
 		add_mark(l, tc_start, { end_col = tc_start + #tree_char, hl_group = "NonText" })
 	end
 
-	-- Right-aligned: assignee + status badge
+	-- Right-aligned: [kind] + assignee + status badge
 	local status = issue.status or ""
 	local badge_hl = status_badge_hl(status)
 	local assignee_text = issue.assignee or "unassigned"
+	local right_vt = {}
+	local kind = state_mod.epic_kind(issue)
+	if kind then
+		right_vt[#right_vt + 1] = { " " .. kind.icon .. " " .. kind.name .. " ", kind.hl }
+	end
+	right_vt[#right_vt + 1] = { " " .. assignee_text .. " ", "Constant" }
+	right_vt[#right_vt + 1] = { " " .. status .. " ", badge_hl }
 	add_mark(l, 0, {
-		virt_text = {
-			{ " " .. assignee_text .. " ", "Constant" },
-			{ " " .. status .. " ", badge_hl },
-		},
+		virt_text = right_vt,
 		virt_text_pos = "right_align",
 	})
 
@@ -346,6 +309,35 @@ function render_node(lines, marks, line_to_node, node, depth, is_last, ancestors
 		-- Build detail as virtual text with per-segment highlighting
 		local detail_vt = {}
 
+		-- Definition-of-Ready glyph
+		local readiness = state_mod.readiness(node)
+		if readiness == "ready" then
+			table.insert(detail_vt, { " ✓ ready", "DiagnosticOk" })
+		elseif readiness == "shaping" then
+			table.insert(detail_vt, { " ◐ shaping", "DiagnosticWarn" })
+		end
+
+		-- Cycle / release identifier
+		local cycle = state_mod.cycle_id(issue)
+		if cycle then
+			if #detail_vt > 0 then table.insert(detail_vt, { " │ ", "NonText" }) end
+			table.insert(detail_vt, { cycle, "Special" })
+		end
+
+		-- Blocked-by dependencies
+		local blockers = {}
+		for _, link in ipairs(issue.links or {}) do
+			local is_blocked_by = (link.label or ""):lower():find("blocked by")
+				or (link.link_type == "Blocks" and link.direction == "inward")
+			if is_blocked_by and link.issue_key and link.issue_key ~= "" then
+				blockers[#blockers + 1] = link.issue_key
+			end
+		end
+		if #blockers > 0 then
+			if #detail_vt > 0 then table.insert(detail_vt, { " │ ", "NonText" }) end
+			table.insert(detail_vt, { "↑ blocked by " .. table.concat(blockers, ", "), "DiagnosticError" })
+		end
+
 		-- Reviewer (assignee is already shown right-aligned on header)
 		local custom = issue.custom_fields_raw or {}
 		for heading, val in pairs(custom) do
@@ -357,7 +349,8 @@ function render_node(lines, marks, line_to_node, node, depth, is_last, ancestors
 					reviewer_name = val
 				end
 				if reviewer_name then
-					table.insert(detail_vt, { " " .. reviewer_name, "Type" })
+					if #detail_vt > 0 then table.insert(detail_vt, { " │ ", "NonText" }) end
+					table.insert(detail_vt, { reviewer_name, "Type" })
 				end
 			end
 		end
