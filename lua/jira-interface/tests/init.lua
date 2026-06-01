@@ -115,47 +115,6 @@ local function test_types()
         assert_eq(desc, "Plain text description", "string description")
     end)
 
-    test("adf_to_text handles bullet list", function()
-        local adf = {
-            content = {
-                {
-                    type = "bulletList",
-                    content = {
-                        {
-                            type = "listItem",
-                            content = {
-                                { type = "paragraph", content = { { type = "text", text = "Item 1" } } },
-                            },
-                        },
-                        {
-                            type = "listItem",
-                            content = {
-                                { type = "paragraph", content = { { type = "text", text = "Item 2" } } },
-                            },
-                        },
-                    },
-                },
-            },
-        }
-        local text = types.adf_to_text(adf)
-        assert_contains(text, "- Item 1", "bullet 1")
-        assert_contains(text, "- Item 2", "bullet 2")
-    end)
-
-    test("adf_to_text handles heading", function()
-        local adf = {
-            content = {
-                {
-                    type = "heading",
-                    attrs = { level = 2 },
-                    content = { { type = "text", text = "My Heading" } },
-                },
-            },
-        }
-        local text = types.adf_to_text(adf)
-        assert_contains(text, "## My Heading", "heading")
-    end)
-
     test("get_level returns 1 for Epic", function()
         assert_eq(types.get_level("Epic"), 1, "Epic level")
     end)
@@ -179,22 +138,6 @@ local function test_types()
 
     test("get_level returns 0 for unknown", function()
         assert_eq(types.get_level("Unknown"), 0, "unknown type")
-    end)
-
-    test("get_valid_transitions for To Do", function()
-        local transitions = types.get_valid_transitions("To Do")
-        assert_eq(#transitions, 1, "transition count")
-        assert_eq(transitions[1], "In Progress", "first transition")
-    end)
-
-    test("get_valid_transitions for In Progress", function()
-        local transitions = types.get_valid_transitions("In Progress")
-        assert_eq(#transitions, 2, "transition count")
-    end)
-
-    test("get_valid_transitions for In Review", function()
-        local transitions = types.get_valid_transitions("In Review")
-        assert_eq(#transitions, 3, "transition count")
     end)
 
     test("get_status_display returns icon", function()

@@ -11,10 +11,6 @@ local M = {}
 ---@field lvl3 string[] Level 3 issue types (Tasks)
 ---@field lvl4 string[] Level 4 issue types (Sub-Tasks)
 
----@class JiraTemplateConfig
----@field description string Template for description field
----@field acceptance_criteria string Template for acceptance criteria field
-
 ---@class JiraDisplayConfig
 ---@field mode string Display mode: "float", "vsplit", "split", "tab"
 ---@field width number|string Width for float/vsplit (number = columns, string like "80%" = percentage)
@@ -25,6 +21,15 @@ local M = {}
 ---@field conceallevel number Conceal level for markdown (0-3)
 ---@field cursorline boolean Highlight current line
 
+---@class JiraBoardConfig
+---@field workable_jql string|nil JQL whose quoted type names define the "workable" set (nil = leaf nodes)
+---@field done_filter string Hide done issues: "none" | "trees" | "leaves"
+---@field type_icons table<string, string> Per issue-type glyphs in the outline
+---@field epic_kinds table<string, {name: string, icon: string, hl: string}> Epic kinds by label
+---@field cycle_pattern string|nil Lua pattern for the Shape Up cycle id (nil disables)
+---@field rules table<string, fun(node: table): boolean> Custom issue rules
+---@field readiness {enabled: boolean, levels: table<number, string[]>} Definition-of-Ready overlay
+
 ---@class JiraConfig
 ---@field auth JiraAuthConfig
 ---@field default_project string
@@ -33,10 +38,13 @@ local M = {}
 ---@field since string|nil Filter issues created since (e.g., "-365d", "-30d", "-7d")
 ---@field types JiraTypesConfig
 ---@field statuses string[]
----@field custom_fields table<string, string> Map of section heading → Jira field ID for edit/create buffers
+---@field board JiraBoardConfig Outline board settings
+---@field acceptance_criteria_names string[] Name fragments for auto-discovering the Acceptance Criteria field
+---@field custom_fields table<string, string|string[]> Map of section heading → Jira field ID(s) for edit/create buffers
 ---@field data_dir string Directory for storing cache and queue
----@field templates table<string, JiraTemplateConfig> Templates per issue type
 ---@field display JiraDisplayConfig Display settings for issue windows
+---@field image table Image/PDF preview settings
+---@field math table LaTeX macro settings
 
 ---@type JiraConfig
 M.defaults = {
@@ -64,6 +72,12 @@ M.defaults = {
     },
     board = {
         workable_jql = nil,
+        -- Which done issues to hide from the outline (the status-bar progress %
+        -- always counts the full fetched set, so this never skews it):
+        --   "none"   show everything
+        --   "trees"  hide only fully-done trees (item + all children done)
+        --   "leaves" also hide done leaf items and fully-done subtrees anywhere
+        done_filter = "leaves",
         type_icons = {
             Epic = "◆",
             Feature = "◆",
@@ -118,7 +132,6 @@ M.defaults = {
     acceptance_criteria_names = { "acceptance criteria" },
     custom_fields = {},
     data_dir = vim.fn.stdpath("data") .. "/jira-interface",
-    templates = {},
     display = {
         mode = "float",     -- "float", "vsplit", "split", "tab"
         width = "80%",      -- number (columns) or string ("80%")
@@ -131,7 +144,7 @@ M.defaults = {
     },
     image = {
         enabled = true,
-        max_file_size = 2 * 1024 * 1024,  -- 2MB
+        max_file_size = 12 * 1024 * 1024,  -- 12MB
         auto_preview = false,              -- true = CursorHold preview
         cache_dir = vim.fn.stdpath("cache") .. "/atlassian/images",
         cell_aspect = 2.0,                 -- terminal cell height/width ratio (tune to fit previews)

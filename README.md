@@ -154,7 +154,6 @@ require("jira-interface").setup({
     custom_fields = {},
 
     data_dir  = vim.fn.stdpath("data") .. "/jira-interface",
-    templates = {}, -- per-issue-type create templates (advanced)
 
     display = {
         mode         = "float",   -- "float" | "vsplit" | "split" | "tab"
@@ -202,11 +201,10 @@ require("confluence-interface").setup({
     max_results = 100,
     data_dir    = vim.fn.stdpath("data") .. "/confluence-interface",
 
-    -- display, image, and math share the same shape as jira-interface (image
-    -- max_file_size defaults to 2 MB here vs 12 MB on the Jira side).
+    -- display, image, and math share the same shape and defaults as jira-interface.
     display = { mode = "float", width = "80%", height = "80%", border = "rounded",
                 wrap = true, linebreak = true, conceallevel = 2, cursorline = true },
-    image   = { enabled = true, max_file_size = 2 * 1024 * 1024, auto_preview = false,
+    image   = { enabled = true, max_file_size = 12 * 1024 * 1024, auto_preview = false,
                 cache_dir = vim.fn.stdpath("cache") .. "/atlassian/images", cell_aspect = 2.0 },
     math    = { enabled = true, block_macro = "mathblock", inline_macro = "mathinline", inline_param = "body" },
 })

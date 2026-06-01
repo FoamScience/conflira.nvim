@@ -517,20 +517,11 @@ are optional; the defaults are shown below.
                              -- nil = count leaf nodes (no children)
       },
 
-      -- Custom fields: map section heading → Jira field ID
+      -- Custom fields: map section heading → Jira field ID. Only needed for
+      -- non-rich-text fields; rich-text fields (incl. Acceptance Criteria) are
+      -- auto-discovered by name. See |atlassian-setup-options|.
       custom_fields = {
-        ["Acceptance Criteria"] = "customfield_10020",
-      },
-
-      -- Templates: expanded in create buffers per issue type
-      -- Each entry has description_sections (list of {heading, placeholder})
-      -- and acceptance_criteria (list of checklist strings).
-      templates = {
-        default = { ... },
-        epic    = { ... },
-        feature = { ... },
-        bug     = { ... },
-        task    = { ... },
+        ["Reviewer"] = "customfield_10030",
       },
 
       -- Display
