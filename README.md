@@ -369,6 +369,22 @@ Under the hood, [`lua/atlassian/board/rules.lua`](lua/atlassian/board/rules.lua)
 
 Run `:checkhealth jira-interface` to verify configuration, dependencies, API connectivity, and cache status.
 
+## Development
+
+Run the full test suite (unit tests + projection/board IR golden tests) headlessly:
+
+```sh
+nvim --headless -c "lua require('atlassian.tests').run_all()" -c "qa"
+```
+
+The renderers are split into a pure `build_ir` (ADF/board → editor-agnostic `ProjectionIR`) and a Neovim-specific `apply_ir` (IR → extmarks):
+
+- **`atlassian.editor.ir`** — the neutral decoration vocabulary (`highlight`, `inline_text`, `eol_text`, `virt_lines`, `sign`), the `to_neutral`/`to_extmark` translation, and JSON `encode`/`decode` for the wire contract.
+- **`atlassian.editor.theme`** — semantic **style tokens** (`heading.2`, `strong`, `diff.add`, …); the IR references styles by token, and each applier maps tokens to its own theme (the Neovim applier resolves them to highlight groups).
+- **`atlassian.width`** — the one swappable Neovim runtime dependency left in the build (display width).
+
+The build is editor-agnostic data end to end and JSON-serializable, so a non-Neovim core (e.g. a Go daemon) can produce the exact same IR that Neovim's `apply_ir` consumes unchanged. The golden tests assert this contract (lines + neutral decorations + lossless JSON round-trip).
+
 ## License
 
 MIT

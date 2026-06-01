@@ -1,4 +1,6 @@
 local extmarks = require("atlassian.editor.extmarks")
+local ir = require("atlassian.editor.ir")
+local width = require("atlassian.width")
 
 local M = {}
 
@@ -10,11 +12,16 @@ local M = {}
 ---@field field string "text" | "attrs.level" | etc.
 ---@field editable boolean
 
----@class RenderResult
+--- ProjectionIR: the editor-agnostic build output. `marks[].opts` is currently
+--- the Neovim dialect (raw extmark opts); see atlassian.editor.ir for the neutral
+--- decoration vocabulary that non-Neovim appliers translate to. `build_ir` is the
+--- pure producer; `apply_ir` is the only Neovim-coupled consumer.
+---@class ProjectionIR
 ---@field lines string[]
 ---@field marks table[] {line, col, opts} for nvim_buf_set_extmark
 ---@field spans RenderSpan[]
 ---@field line_to_node table<number, table>
+---@alias RenderResult ProjectionIR
 
 ---@class RenderContext
 ---@field lines string[]
@@ -653,7 +660,7 @@ local function render_table(ctx, node, path)
 			end
 			local cell_text = table.concat(text_parts)
 			local is_header = cell.type == "tableHeader"
-			local dw = vim.fn.strdisplaywidth(cell_text)
+			local dw = width.display_width(cell_text)
 
 			grid[ri][ci] = {
 				text = cell_text,
@@ -907,14 +914,14 @@ function M.render(adf)
 		ctx.lines[#ctx.lines] = nil
 	end
 
-	return {
+	return ir.neutralize({
 		lines = ctx.lines,
 		marks = ctx.marks,
 		spans = ctx.spans,
 		line_to_node = ctx.line_to_node,
 		image_refs = ctx.image_refs,
 		link_refs = ctx.link_refs,
-	}
+	})
 end
 
 ---@param buf number
@@ -932,8 +939,9 @@ function M.apply(buf, result)
 		local line = mark.line
 		if line < line_count then
 			local line_len = #result.lines[line + 1]
-			local col = math.min(mark.col, line_len)
-			local opts = mark.opts
+			local em = ir.to_extmark(mark)
+			local col = math.min(em.col, line_len)
+			local opts = em.opts
 			if opts.end_col then
 				opts = vim.tbl_extend("force", opts, { end_col = math.min(opts.end_col, line_len) })
 			end
@@ -968,5 +976,11 @@ function M.build_path_to_lines(result)
 	end
 	return map
 end
+
+-- Seam vocabulary: `build_ir` (pure ADF→IR) and `apply_ir` (IR→Neovim) are the
+-- canonical names for the projection boundary. `render`/`apply` remain as
+-- aliases for existing callers.
+M.build_ir = M.render
+M.apply_ir = M.apply
 
 return M

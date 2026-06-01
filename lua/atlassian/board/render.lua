@@ -1,6 +1,8 @@
 local state_mod = require("atlassian.board.state")
 local extmarks = require("atlassian.editor.extmarks")
 local format = require("atlassian.format")
+local ir = require("atlassian.editor.ir")
+local width = require("atlassian.width")
 
 local M = {}
 
@@ -64,13 +66,18 @@ local function status_badge_hl(status)
 	return "CurSearch"
 end
 
----@class BoardRenderResult
+--- BoardIR: the editor-agnostic build output for the outline board. Same seam
+--- as the projection editor — `build_ir` is the pure producer, `apply_ir` the
+--- only Neovim-coupled consumer. `marks[].opts` is the Neovim dialect; classify
+--- it with atlassian.editor.ir for non-Neovim appliers.
+---@class BoardIR
 ---@field lines string[]
----@field marks table[]
+---@field marks table[] {line, col, opts} for nvim_buf_set_extmark
 ---@field line_to_node table<number, BoardNode>
+---@alias BoardRenderResult BoardIR
 
 ---@param board_state BoardState
----@return BoardRenderResult
+---@return BoardIR
 function M.render(board_state)
 	M.setup()
 
@@ -81,7 +88,7 @@ function M.render(board_state)
 	local max_depth = 0
 	local function scan_depth(nodes, d)
 		for _, node in ipairs(nodes) do
-			local dw = vim.fn.strdisplaywidth(node.issue.key or "")
+			local dw = width.display_width(node.issue.key or "")
 			if dw > max_key_dw then max_key_dw = dw end
 			if d > max_depth then max_depth = d end
 			if #node.children > 0 then
@@ -185,11 +192,11 @@ function M.render(board_state)
 	l = add_line(" [e]dit [t]ransition [a]ssign [c]omment [/]search [g]roup [r]efresh [?]help")
 	add_mark(l, 0, { end_col = #lines[#lines], hl_group = "StatusLine" })
 
-	return {
+	return ir.neutralize({
 		lines = lines,
 		marks = marks,
 		line_to_node = line_to_node,
-	}
+	})
 end
 
 --- @param ancestors string[] continuation prefixes from ancestor levels ("│   " or "    ")
@@ -227,9 +234,9 @@ function render_node(lines, marks, line_to_node, node, depth, is_last, ancestors
 
 	-- Build left part: prefix + key, padded so title starts at title_col
 	local prefix = ancestor_prefix .. tree_char .. expand
-	local prefix_dw = vim.fn.strdisplaywidth(prefix)
+	local prefix_dw = width.display_width(prefix)
 	-- icon(2) + key + padding to reach title_col
-	local left_dw = prefix_dw + 2 + vim.fn.strdisplaywidth(key_text)
+	local left_dw = prefix_dw + 2 + width.display_width(key_text)
 	local pad_to_title = math.max(2, title_col - left_dw)
 	local key_padded = key_text .. string.rep(" ", pad_to_title)
 
@@ -302,7 +309,7 @@ function render_node(lines, marks, line_to_node, node, depth, is_last, ancestors
 		else
 			detail_tree = "  │"
 		end
-		local detail_tree_dw = vim.fn.strdisplaywidth(detail_tree)
+		local detail_tree_dw = width.display_width(detail_tree)
 		local detail_pad = math.max(0, title_col - detail_tree_dw)
 		local detail_prefix = detail_tree .. string.rep(" ", detail_pad)
 
@@ -431,8 +438,9 @@ function M.apply(buf, result)
 	for _, mark in ipairs(result.marks) do
 		if mark.line < line_count then
 			local line_len = #result.lines[mark.line + 1]
-			local col = math.min(mark.col, line_len)
-			local opts = mark.opts
+			local em = ir.to_extmark(mark)
+			local col = math.min(em.col, line_len)
+			local opts = em.opts
 			if opts.end_col then
 				opts = vim.tbl_extend("force", opts, { end_col = math.min(opts.end_col, line_len) })
 			end
@@ -440,5 +448,10 @@ function M.apply(buf, result)
 		end
 	end
 end
+
+-- Seam vocabulary (mirrors atlassian.editor.render): build_ir (pure
+-- BoardState→IR) and apply_ir (IR→Neovim). render/apply kept for callers.
+M.build_ir = M.render
+M.apply_ir = M.apply
 
 return M
