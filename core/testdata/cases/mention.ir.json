@@ -1,0 +1,1 @@
+{"lines":["hi @alice"],"spans":[{"field":"text","path":[1,1],"line":0,"editable":true,"col_end":3,"col_start":0},{"field":"text","path":[1,2],"line":0,"editable":false,"col_end":9,"col_start":3}],"marks":[{"kind":"highlight","line":0,"col":3,"end_col":9,"hl":"mention"}]}

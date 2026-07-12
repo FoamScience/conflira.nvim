@@ -110,6 +110,12 @@ board.* options:
                              "none" (show all), "trees" (hide only
                              fully-done trees), "leaves" (also hide done
                              leaf items and fully-done subtrees anywhere).
+  involvement_sections ...   Bottom sections for issues where a user-valued
+                             custom field is you but you are not the
+                             assignee. List of { name, match = {substrings} };
+                             fields are auto-sensed and join the first
+                             matching section. Default: Reviewing (review),
+                             Additional Assignees (additional, assignee).
   type_icons       ...       Per-type glyphs in the outline.
   epic_kinds       ...       label -> { name, icon, hl }. Drives kind
                              badges and `gk` grouping (Pillar / Shape Up

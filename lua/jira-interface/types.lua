@@ -149,6 +149,7 @@ function M.parse_issue(raw)
         acceptance_criteria = M.parse_acceptance_criteria(fields),
         acceptance_criteria_raw = M.parse_acceptance_criteria_raw(fields), -- raw ADF for AC field
         custom_fields_raw = M.parse_custom_fields_raw(fields), -- raw values for all custom_fields
+        people_fields = M.parse_people_fields(fields), -- { [field_id] = {accountId,…} } for value-based involvement
         status = is_table(fields.status) and fields.status.name or "Unknown",
         priority = is_table(fields.priority) and fields.priority.name or nil,
         priority_id = is_table(fields.priority) and fields.priority.id or nil,
@@ -375,6 +376,29 @@ function M.parse_acceptance_criteria_raw(fields)
 end
 
 ---@param fields table
+--- Scan all customfield_* values that look like people (a user object or array
+--- of them) and collect their accountIds. Used for value-based involvement
+--- detection (Reviewer / Additional Assignees aren't JQL-searchable).
+---@param fields table raw issue.fields
+---@return table<string, string[]> { [field_id] = {accountId,…} }
+function M.parse_people_fields(fields)
+    local out = {}
+    for k, v in pairs(fields or {}) do
+        if type(k) == "string" and k:match("^customfield_%d+$") and is_table(v) then
+            local users = v
+            if v.accountId then users = { v } end -- single user object
+            local ids = {}
+            if vim.islist and vim.islist(users) or type(users[1]) == "table" then
+                for _, u in ipairs(users) do
+                    if is_table(u) and u.accountId then ids[#ids + 1] = u.accountId end
+                end
+            end
+            if #ids > 0 then out[k] = ids end
+        end
+    end
+    return out
+end
+
 ---@return table<string, any> Map of section heading → raw field value
 function M.parse_custom_fields_raw(fields)
     local custom = config.options.custom_fields or {}

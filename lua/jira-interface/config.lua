@@ -78,6 +78,30 @@ M.defaults = {
         --   "trees"  hide only fully-done trees (item + all children done)
         --   "leaves" also hide done leaf items and fully-done subtrees anywhere
         done_filter = "leaves",
+        -- Bottom "involvement" sections: issues where a user-valued custom field
+        -- (Reviewer, Additional Assignees, …) is you, but you're not the assignee.
+        -- Each section has a `name` and `match` substrings tested (lowercased,
+        -- case-insensitive) against custom-field names. Fields are auto-sensed;
+        -- a field joins the FIRST section it matches (so sections are mutually
+        -- exclusive — order matters). Set to {} to disable these sections.
+        involvement_sections = {
+            { name = "Reviewing", match = { "review" } },
+            { name = "Additional Assignees", match = { "additional", "assignee" } },
+        },
+        -- Reviewer / Additional Assignees fields usually have no JQL searcher, so
+        -- they can't be queried. The board detects them from field VALUES on
+        -- fetched issues, and scans issues updated in the last N days to surface
+        -- ones where you're ONLY a reviewer/additional. 0 disables the scan.
+        involvement_scan_days = 120,
+        -- Involvement icons drawn next to each issue key, per matched relationship
+        -- (assigned/reporter/review/additional/watching). One of:
+        --   "nerd"     force Nerd Font glyphs (requires a Nerd Font)
+        --   "unicode"  force plain Unicode glyphs
+        --   { kind = glyph } table to pin your own
+        --   nil (default) auto-detect: uses Nerd Font if vim.g.have_nerd_font is
+        --                 set, OR if an icon plugin (nvim-web-devicons / mini.icons)
+        --                 is installed; otherwise plain Unicode
+        involvement_icons = nil,
         type_icons = {
             Epic = "◆",
             Feature = "◆",

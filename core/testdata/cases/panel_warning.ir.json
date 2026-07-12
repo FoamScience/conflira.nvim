@@ -1,0 +1,1 @@
+{"lines":["careful"],"spans":[{"field":"text","path":[1,1],"line":0,"editable":true,"col_end":7,"col_start":0}],"marks":[{"kind":"sign","line":0,"col":0,"text":" ","hl":"panel.warning"},{"kind":"inline_text","chunks":[["▎ ","panel.warning"]],"line":0,"col":0,"pos":"inline"}]}

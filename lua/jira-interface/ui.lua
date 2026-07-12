@@ -82,41 +82,40 @@ local function build_issue_adf(issue)
         })
     end
 
-    -- Custom field sections
+    -- Custom field sections — only shown when the field is actually defined
+    -- (e.g. epics have no acceptance criteria; don't render an empty section).
     for heading, _ in pairs(config.options.custom_fields or {}) do
-        table.insert(content, { type = "rule" })
-        table.insert(content, {
-            type = "heading",
-            attrs = { level = 2 },
-            content = { { type = "text", text = heading } },
-        })
-
         local raw = (issue.custom_fields_raw or {})[heading]
-        if raw and type(raw) == "table" and raw.content then
-            local adf = vim.deepcopy(raw)
-            for _, node in ipairs(adf.content) do
-                if node.type == "bulletList" then
-                    node.type = "taskList"
-                    for _, item in ipairs(node.content or {}) do
-                        if item.type == "listItem" then
-                            item.type = "taskItem"
-                            item.attrs = item.attrs or {}
-                            item.attrs.state = item.attrs.state or "TODO"
+        local has_adf = type(raw) == "table" and raw.content
+        local has_str = type(raw) == "string" and raw ~= ""
+        if has_adf or has_str then
+            table.insert(content, { type = "rule" })
+            table.insert(content, {
+                type = "heading",
+                attrs = { level = 2 },
+                content = { { type = "text", text = heading } },
+            })
+            if has_adf then
+                local adf = vim.deepcopy(raw)
+                for _, node in ipairs(adf.content) do
+                    if node.type == "bulletList" then
+                        node.type = "taskList"
+                        for _, item in ipairs(node.content or {}) do
+                            if item.type == "listItem" then
+                                item.type = "taskItem"
+                                item.attrs = item.attrs or {}
+                                item.attrs.state = item.attrs.state or "TODO"
+                            end
                         end
                     end
+                    table.insert(content, node)
                 end
-                table.insert(content, node)
+            else
+                table.insert(content, {
+                    type = "paragraph",
+                    content = { { type = "text", text = raw } },
+                })
             end
-        elseif raw and type(raw) == "string" and raw ~= "" then
-            table.insert(content, {
-                type = "paragraph",
-                content = { { type = "text", text = raw } },
-            })
-        else
-            table.insert(content, {
-                type = "paragraph",
-                content = { { type = "text", text = "No " .. heading:lower(), marks = { { type = "em" } } } },
-            })
         end
     end
 
@@ -129,9 +128,13 @@ local function build_issue_adf(issue)
             content = { { type = "text", text = "Comments (" .. #issue.comments .. ")" } },
         })
 
-        for _, comment in ipairs(issue.comments) do
+        for i, comment in ipairs(issue.comments) do
             local author_text = comment.author_name or "Unknown"
             local time_text = " · " .. atlassian_format.format_relative_time(comment.created)
+
+            if i > 1 then
+                table.insert(content, { type = "rule" }) -- separator between comments
+            end
 
             table.insert(content, {
                 type = "paragraph",

@@ -6,43 +6,85 @@ local M = {}
 ---@type BoardState|nil
 local board = nil
 
---- Build the "my involvement" JQL query.
---- Resolves custom field IDs first, then builds JQL.
----@param callback fun(jql: string)
-local function build_involvement_jql(callback)
+--- The relationship tag a sensed involvement section maps to: a "review"-ish
+--- section → "review", otherwise "additional".
+local function section_kind(def)
+	for _, m in ipairs(def.match or {}) do
+		if m:lower():find("review", 1, true) then
+			return "review"
+		end
+	end
+	return "additional"
+end
+
+--- Build the board's relationship-tagged queries plus the value-based detection
+--- context. Native relationships (assigned/reporter/watching) are JQL queries.
+--- Reviewer / Additional Assignees fields usually have NO JQL searcher, so they
+--- can't be queried — instead we request those field VALUES on every search and
+--- detect membership client-side, plus run one bounded "discovery" scan to
+--- surface issues where you're ONLY a reviewer/additional. Resolves custom field
+--- IDs and the current account id first.
+---@param callback fun(queries: { kind: string, jql: string }[], ctx: { review_ids: string[], additional_ids: string[], account_id: string|nil })
+local function build_queries(callback)
 	local api = require("jira-interface.api")
 
-	-- Ensure custom fields are resolved before building JQL
 	api.ensure_custom_fields_resolved(function()
-		local config = require("jira-interface.config")
-		local clauses = { "assignee = currentUser()" }
+		api.ensure_account_id(function(account_id)
+			local config = require("jira-interface.config")
 
-		local custom = config.options.custom_fields or {}
+			-- Exclude epics (lvl1) — trees start at level 2.
+			local lvl1 = config.options.types and config.options.types.lvl1 or { "Epic" }
+			local exclude_parts = {}
+			for _, t in ipairs(lvl1) do
+				exclude_parts[#exclude_parts + 1] = '"' .. t .. '"'
+			end
+			local exclude = ""
+			if #exclude_parts > 0 then
+				exclude = " AND issuetype NOT IN (" .. table.concat(exclude_parts, ", ") .. ")"
+			end
 
-		for heading, ids in pairs(custom) do
-			local lower = heading:lower()
-			if lower:find("review") or lower:find("additional") or lower:find("assignee") then
-				for _, id in ipairs(type(ids) == "table" and ids or { ids }) do
-					table.insert(clauses, '"' .. id .. '" = currentUser()')
+			-- Split sensed people fields into review vs additional (by section kind),
+			-- plus any configured custom_fields headings matching (backward compat).
+			local section_defs = config.options.board and config.options.board.involvement_sections or {}
+			local section_ids = api.involvement_section_ids or {}
+			local custom = config.options.custom_fields or {}
+			local review_ids, additional_ids = {}, {}
+			local seen = {}
+			local function add_id(target, id)
+				if id and not seen[id] then seen[id] = true; target[#target + 1] = id end
+			end
+			for i, def in ipairs(section_defs) do
+				local target = section_kind(def) == "review" and review_ids or additional_ids
+				for _, id in ipairs(section_ids[i] or {}) do add_id(target, id) end
+				for heading, hids in pairs(custom) do
+					local hl = heading:lower()
+					for _, m in ipairs(def.match or {}) do
+						if hl:find(m:lower(), 1, true) then
+							for _, id in ipairs(type(hids) == "table" and hids or { hids }) do add_id(target, id) end
+							break
+						end
+					end
 				end
 			end
-		end
 
-		local involvement = "(" .. table.concat(clauses, " OR ") .. ")"
+			-- Native (JQL-searchable) relationships.
+			local queries = {
+				{ kind = "assigned", jql = "assignee = currentUser()" .. exclude .. " ORDER BY updated DESC" },
+				{ kind = "reporter", jql = "reporter = currentUser()" .. exclude .. " ORDER BY updated DESC" },
+				{ kind = "watching", jql = "watcher = currentUser()" .. exclude .. " ORDER BY updated DESC" },
+			}
 
-		-- Exclude epics (lvl1 types) — trees start at level 2
-		local lvl1 = config.options.types and config.options.types.lvl1 or { "Epic" }
-		local exclude_parts = {}
-		for _, t in ipairs(lvl1) do
-			exclude_parts[#exclude_parts + 1] = '"' .. t .. '"'
-		end
-		local exclude = ""
-		if #exclude_parts > 0 then
-			exclude = " AND issuetype NOT IN (" .. table.concat(exclude_parts, ", ") .. ")"
-		end
+			-- Discovery scan for the non-searchable review/additional fields.
+			local scan_days = (config.options.board and config.options.board.involvement_scan_days) or 120
+			if (#review_ids > 0 or #additional_ids > 0) and account_id and scan_days > 0 then
+				queries[#queries + 1] = {
+					kind = "discovery",
+					jql = "updated >= -" .. scan_days .. "d" .. exclude .. " ORDER BY updated DESC",
+				}
+			end
 
-		local jql = involvement .. exclude .. " ORDER BY updated DESC"
-		callback(jql)
+			callback(queries, { review_ids = review_ids, additional_ids = additional_ids, account_id = account_id })
+		end)
 	end)
 end
 
@@ -120,40 +162,98 @@ function M.open(opts)
 	local project = opts.project or ""
 	local force_group = opts.group
 
-	local function do_open(jql)
+	-- Run each relationship-tagged query, union the results by key (stamping
+	-- issue.involvement with every kind that matched), bubble parents once, and
+	-- show ONE merged board. Native kinds come from the query; review/additional
+	-- are detected from people-field VALUES (those fields aren't JQL-searchable),
+	-- and a "discovery" query only contributes value-matched issues.
+	local function do_open(queries, ctx)
+		ctx = ctx or {}
 		notify.progress_start("board", "Loading board...")
 
-		api.search(jql, function(err, issues)
-			if err then
-				notify.progress_error("board", "Board failed: " .. tostring(err))
+		local by_key = {} -- key -> issue (first wins; involvement unioned)
+		local order = {}
+		local main_jql = queries[1] and queries[1].jql or ""
+
+		local function add_involvement(issue, kind)
+			if not kind then return end
+			issue.involvement = issue.involvement or {}
+			if not vim.tbl_contains(issue.involvement, kind) then
+				issue.involvement[#issue.involvement + 1] = kind
+			end
+		end
+
+		-- Detect review/additional from the issue's people-field values.
+		local function value_match(issue, ids)
+			local pf = issue.people_fields or {}
+			for _, id in ipairs(ids or {}) do
+				for _, acc in ipairs(pf[id] or {}) do
+					if acc == ctx.account_id then return true end
+				end
+			end
+			return false
+		end
+
+		local function run(i)
+			if i > #queries then
+				notify.progress_update("board", "Building tree... (" .. #order .. " issues)")
+				bubble_parents(order, function(all_issues)
+					vim.schedule(function()
+						notify.progress_finish("board")
+						M.show(all_issues, project, main_jql, force_group, opts.jql)
+					end)
+				end)
 				return
 			end
-
-			issues = issues or {}
-			notify.progress_update("board", "Building tree... (" .. #issues .. " issues)")
-
-			bubble_parents(issues, function(all_issues)
-				vim.schedule(function()
-					notify.progress_finish("board")
-					M.show(all_issues, project, jql, force_group)
-				end)
+			local q = queries[i]
+			api.search(q.jql, function(err, issues)
+				if err and q.kind == "assigned" then
+					notify.progress_error("board", "Board failed: " .. tostring(err))
+					return
+				end
+				for _, is in ipairs(issues or {}) do
+					local review = ctx.account_id and value_match(is, ctx.review_ids) or false
+					local additional = ctx.account_id and value_match(is, ctx.additional_ids) or false
+					-- Discovery only surfaces reviewer/additional-only issues.
+					if not (q.kind == "discovery" and not review and not additional) then
+						local ex = by_key[is.key]
+						if not ex then
+							by_key[is.key] = is
+							order[#order + 1] = is
+							ex = is
+						end
+						if q.kind ~= "discovery" then add_involvement(ex, q.kind) end
+						if review then add_involvement(ex, "review") end
+						if additional then add_involvement(ex, "additional") end
+					end
+				end
+				run(i + 1)
 			end)
-		end)
+		end
+		run(1)
 	end
 
 	if opts.jql then
-		do_open(opts.jql)
+		do_open({ { kind = "assigned", jql = opts.jql } })
 	else
-		build_involvement_jql(do_open)
+		build_queries(do_open)
 	end
 end
 
---- Show board with given issues.
+--- Recompute board.groups from the merged tree using the current group mode.
+local function compute_groups()
+	if not board then return end
+	board.groups = state_mod.group_nodes(board.tree, board.group_mode)
+end
+
+--- Show board with given issues (a single merged tree; involvement is carried
+--- per-issue as icons).
 ---@param issues JiraIssue[]
 ---@param project string
----@param jql string
+---@param jql string  main (assigned) jql, kept for display
 ---@param force_group? string
-function M.show(issues, project, jql, force_group)
+---@param custom_jql? string  explicit user jql, if opened with one (for refresh)
+function M.show(issues, project, jql, force_group, custom_jql)
 	-- Create or reuse board buffer
 	local buf, win
 	if board and vim.api.nvim_buf_is_valid(board.buf) then
@@ -183,8 +283,8 @@ function M.show(issues, project, jql, force_group)
 	local config = require("jira-interface.config")
 	local done_filter = config.options.board and config.options.board.done_filter or "leaves"
 	local tree = state_mod.filter_for_display(state_mod.build_tree(issues, nil), done_filter)
+
 	local group_mode = force_group or "none"
-	local groups = state_mod.group_nodes(tree, group_mode)
 
 	board = {
 		buf = buf,
@@ -192,15 +292,17 @@ function M.show(issues, project, jql, force_group)
 		ns = render_mod.ns,
 		issues = issues,
 		tree = tree,
-		groups = groups,
+		groups = {},
 		group_mode = group_mode,
 		line_to_node = {},
 		line_count = 0,
 		filters = {},
 		jql = jql,
+		custom_jql = custom_jql,
 		project = project,
 		my_account_id = nil,
 	}
+	compute_groups()
 
 	M.refresh_render()
 	M.setup_keymaps(buf)
@@ -295,15 +397,16 @@ end
 local function set_group_mode(mode)
 	if not board then return end
 	board.group_mode = mode
-	board.groups = state_mod.group_nodes(board.tree, mode)
+	compute_groups()
 	M.refresh_render()
 	vim.api.nvim_win_set_cursor(0, { 1, 0 })
 end
 
---- Refresh data from API.
+--- Refresh data from API. A merged board (no explicit jql) re-runs the full
+--- involvement query set; a custom-jql board re-runs that single query.
 local function refresh_data()
 	if not board then return end
-	M.open({ project = board.project, jql = board.jql })
+	M.open({ project = board.project, jql = board.custom_jql })
 end
 
 --- Setup all keymaps on the board buffer.
@@ -319,16 +422,14 @@ function M.setup_keymaps(buf)
 	-- zc: collapse only (like Vim fold close)
 	-- zO: expand entire tree recursively
 	-- zM: collapse entire tree
-	-- <CR>: toggle if has children, open issue if leaf
+	-- <CR>: always open the issue view (folding is on za/zo/zc).
 	vim.keymap.set("n", "<CR>", function()
 		local node = node_at_cursor()
-		if node and #node.children > 0 then
-			toggle_expand()
-		elseif node then
+		if node then
 			local ui = require("jira-interface.ui")
 			ui.show_issue_projected(node.issue)
 		end
-	end, opts("Expand/collapse or open issue"))
+	end, opts("Open issue"))
 
 	vim.keymap.set("n", "za", toggle_expand, opts("Toggle expand/collapse"))
 	vim.keymap.set("n", "zo", function()
@@ -376,7 +477,7 @@ function M.setup_keymaps(buf)
 					if not board then return end
 					node.issue.status = new_status
 					node.urgency = state_mod.compute_urgency(node.issue)
-					board.groups = state_mod.group_nodes(board.tree, board.group_mode)
+					compute_groups()
 					M.refresh_render()
 				end)
 			end)
@@ -526,7 +627,7 @@ function M.setup_keymaps(buf)
 	vim.keymap.set("n", "?", function()
 		local help = {
 			"Board Keymaps:",
-			"  <CR>  Open issue / toggle expand",
+			"  <CR>  Open issue",
 			"  za    Toggle expand/collapse",
 			"  zo    Expand (open fold)",
 			"  zc    Collapse (close fold)",
@@ -551,6 +652,15 @@ function M.setup_keymaps(buf)
 			"  r     Refresh",
 			"  q     Close",
 		}
+		-- Involvement icon legend (matches the active icon set).
+		local legend = render_mod.involvement_legend()
+		if #legend > 0 then
+			help[#help + 1] = ""
+			help[#help + 1] = "Involvement icons (next to key):"
+			for _, e in ipairs(legend) do
+				help[#help + 1] = "  " .. e.glyph .. "  " .. e.label
+			end
+		end
 		vim.notify(table.concat(help, "\n"), vim.log.levels.INFO)
 	end, opts("Show help"))
 end

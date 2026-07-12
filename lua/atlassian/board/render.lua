@@ -10,7 +10,7 @@ M.ns = vim.api.nvim_create_namespace("atlassian_board")
 
 local urgency_signs = {
 	overdue = { text = "●", hl = "DiagnosticError" },
-	blocked = { text = "●", hl = "DiagnosticError" },
+	blocked = { text = "●", hl = "DiagnosticUnnecessary" },
 	due_soon = { text = "●", hl = "DiagnosticWarn" },
 	done = { text = "●", hl = "DiagnosticOk" },
 	stale = { text = "○", hl = "Comment" },
@@ -41,6 +41,97 @@ local type_hls = {
 	Task = "Function",
 	["Sub-Task"] = "Identifier",
 }
+
+-- Involvement icons — drawn next to the key for every relationship that matched
+-- the current user (assigned/reporter/review/additional/watching).
+local involvement_kinds = { "assigned", "reporter", "review", "additional", "watching" }
+-- Nerd Font (FontAwesome) glyphs, as UTF-8 byte escapes so they survive editing:
+-- user U+F007, pencil U+F040, check U+F00C, user-plus U+F234, eye U+F06E.
+local involvement_icons_nerd = {
+	assigned = "",
+	reporter = "",
+	review = "",
+	additional = "",
+	watching = "",
+}
+local involvement_icons_unicode = {
+	assigned = "★",
+	reporter = "✎",
+	review = "✓",
+	additional = "⊕",
+	watching = "◉",
+}
+-- A single shared color for every involvement icon, so the cluster reads as one
+-- group rather than a rainbow.
+local involvement_color = "Function"
+local involvement_labels = {
+	assigned = "Assigned to you",
+	reporter = "Reported by you",
+	review = "You're a reviewer",
+	additional = "Additional assignee",
+	watching = "Watching",
+}
+
+--- Best-effort guess of whether a Nerd Font is in use. Neovim can't see the
+--- terminal font, so we use the strongest signals available, in order:
+---   1. vim.g.have_nerd_font — the community convention, if the user set it
+---   2. an installed icon-provider plugin (nvim-web-devicons / mini.icons) — a
+---      reliable proxy, since those are useless without a Nerd Font
+local function nerd_available()
+	if vim.g.have_nerd_font ~= nil then
+		return vim.g.have_nerd_font and true or false
+	end
+	if package.loaded["nvim-web-devicons"] or package.loaded["mini.icons"] then
+		return true
+	end
+	return pcall(require, "nvim-web-devicons") or pcall(require, "mini.icons")
+end
+
+--- The active involvement glyph set. `board.involvement_icons` may be:
+---   "nerd" | "unicode"  → that built-in set
+---   a { kind = glyph } table → your own glyphs
+---   nil → auto: nerd_available() decides (see above).
+local function get_involvement_icons()
+	local config = require("jira-interface.config")
+	local cfg = config.options.board and config.options.board.involvement_icons
+	if cfg == "nerd" then
+		return involvement_icons_nerd
+	elseif cfg == "unicode" then
+		return involvement_icons_unicode
+	elseif type(cfg) == "table" then
+		return cfg
+	end
+	return nerd_available() and involvement_icons_nerd or involvement_icons_unicode
+end
+
+--- Legend for the active involvement icon set, in display order: a list of
+--- { kind, glyph, label, hl } for the board help (`?`).
+function M.involvement_legend()
+	local icons = get_involvement_icons()
+	local out = {}
+	for _, kind in ipairs(involvement_kinds) do
+		local g = icons[kind]
+		if g and g ~= "" then
+			out[#out + 1] = { kind = kind, glyph = g, label = involvement_labels[kind], hl = involvement_color }
+		end
+	end
+	return out
+end
+
+--- Display width of an issue's trailing involvement icons (each " " + glyph),
+--- so summaries stay aligned at title_col.
+local function involvement_dw(issue, icons)
+	local w = 0
+	for _, kind in ipairs(involvement_kinds) do
+		if issue.involvement and vim.tbl_contains(issue.involvement, kind) then
+			local g = icons[kind]
+			if g and g ~= "" then
+				w = w + width.display_width(" " .. g)
+			end
+		end
+	end
+	return w
+end
 
 local setup_done = false
 
@@ -84,12 +175,16 @@ function M.render(board_state)
 	-- Compute title column: all summaries start at same display column
 	-- title_col = max_prefix_dw + icon(2) + max_key_dw + gap(2)
 	-- max_prefix_dw accounts for deepest nesting: "  │   └── " etc.
+	local icons = get_involvement_icons()
 	local max_key_dw = 0
 	local max_depth = 0
+	local max_inv_dw = 0
 	local function scan_depth(nodes, d)
 		for _, node in ipairs(nodes) do
 			local dw = width.display_width(node.issue.key or "")
 			if dw > max_key_dw then max_key_dw = dw end
+			local idw = involvement_dw(node.issue, icons)
+			if idw > max_inv_dw then max_inv_dw = idw end
 			if d > max_depth then max_depth = d end
 			if #node.children > 0 then
 				scan_depth(node.children, d + 1)
@@ -99,9 +194,9 @@ function M.render(board_state)
 	scan_depth(board_state.tree, 0)
 	max_key_dw = math.max(max_key_dw, 8)
 	-- prefix at depth d: root="▼ "(2) or "  "+"│   "*d+"└── "(4) = 2+4*d+4
-	-- icon = 2 display chars, gap = 2
+	-- icon = 2 display chars, gap = 2; reserve max_inv_dw for involvement icons
 	local deepest_prefix = 2 + 4 * max_depth + 4
-	local title_col = deepest_prefix + 2 + max_key_dw + 2
+	local title_col = deepest_prefix + 2 + max_key_dw + 2 + max_inv_dw
 
 	local lines = {}
 	local marks = {}
@@ -182,7 +277,7 @@ function M.render(board_state)
 				add_line("")
 			end
 			local is_last_root = ni == #group.nodes
-			render_node(lines, marks, line_to_node, node, 0, is_last_root, {}, add_line, add_mark, max_key_dw, title_col)
+			render_node(lines, marks, line_to_node, node, 0, is_last_root, {}, add_line, add_mark, max_key_dw, title_col, icons)
 			line = #lines
 		end
 	end
@@ -209,7 +304,7 @@ end
 ---@param ancestors string[]
 ---@param add_line fun(text: string): number
 ---@param add_mark fun(l: number, col: number, opts: table)
-function render_node(lines, marks, line_to_node, node, depth, is_last, ancestors, add_line, add_mark, max_key_dw, title_col)
+function render_node(lines, marks, line_to_node, node, depth, is_last, ancestors, add_line, add_mark, max_key_dw, title_col, icons)
 	local issue = node.issue
 	local ancestor_prefix = table.concat(ancestors)
 
@@ -235,8 +330,9 @@ function render_node(lines, marks, line_to_node, node, depth, is_last, ancestors
 	-- Build left part: prefix + key, padded so title starts at title_col
 	local prefix = ancestor_prefix .. tree_char .. expand
 	local prefix_dw = width.display_width(prefix)
-	-- icon(2) + key + padding to reach title_col
-	local left_dw = prefix_dw + 2 + width.display_width(key_text)
+	-- icon(2) + key + involvement icons + padding to reach title_col
+	local inv_icon_dw = involvement_dw(issue, icons or {})
+	local left_dw = prefix_dw + 2 + width.display_width(key_text) + inv_icon_dw
 	local pad_to_title = math.max(2, title_col - left_dw)
 	local key_padded = key_text .. string.rep(" ", pad_to_title)
 
@@ -269,6 +365,22 @@ function render_node(lines, marks, line_to_node, node, depth, is_last, ancestors
 	local key_end = key_start + #key_text
 	local key_hl = node.is_context and "Comment" or (type_hls[issue.type] or "Identifier")
 	add_mark(l, key_start, { end_col = key_end, hl_group = key_hl })
+
+	-- Involvement icons, inline right after the key.
+	if issue.involvement and #issue.involvement > 0 and icons then
+		local inv_vt = {}
+		for _, kind in ipairs(involvement_kinds) do
+			if vim.tbl_contains(issue.involvement, kind) then
+				local g = icons[kind]
+				if g and g ~= "" then
+					inv_vt[#inv_vt + 1] = { " " .. g, node.is_context and "Comment" or involvement_color }
+				end
+			end
+		end
+		if #inv_vt > 0 then
+			add_mark(l, key_end, { virt_text = inv_vt, virt_text_pos = "inline" })
+		end
+	end
 
 	-- Summary highlight — starts after the padded key
 	local sum_start = key_start + #key_padded
@@ -421,7 +533,7 @@ function render_node(lines, marks, line_to_node, node, depth, is_last, ancestors
 
 		for ci, child in ipairs(node.children) do
 			local child_is_last = ci == #node.children
-			render_node(lines, marks, line_to_node, child, depth + 1, child_is_last, child_ancestors, add_line, add_mark, max_key_dw, title_col)
+			render_node(lines, marks, line_to_node, child, depth + 1, child_is_last, child_ancestors, add_line, add_mark, max_key_dw, title_col, icons)
 		end
 	end
 end

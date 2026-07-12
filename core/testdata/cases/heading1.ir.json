@@ -1,0 +1,1 @@
+{"lines":["Hello"],"spans":[{"field":"text","path":[1,1],"line":0,"editable":true,"col_end":5,"col_start":0}],"marks":[{"kind":"highlight","line":0,"col":0,"end_col":5,"hl":"heading.1"},{"kind":"sign","line":0,"col":0,"text":"󰲡 ","hl":"heading.1"}]}

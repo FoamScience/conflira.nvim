@@ -9,6 +9,11 @@ local error_mod = require("atlassian.error")
 ---@type boolean
 M.is_online = true
 
+-- Auto-sensed user-valued field IDs per involvement section, aligned with
+-- config.board.involvement_sections. Populated by ensure_custom_fields_resolved.
+---@type string[][]
+M.involvement_section_ids = {}
+
 -- Whether custom field IDs have been resolved from the server
 local _fields_resolved = false
 
@@ -64,7 +69,27 @@ local function build_fields_param()
             table.insert(field_list, value)
         end
     end
+    -- Sensed involvement (Reviewer / Additional) people fields, so their values
+    -- come back for value-based detection (they aren't JQL-searchable).
+    for _, ids in ipairs(M.involvement_section_ids or {}) do
+        for _, id in ipairs(ids) do
+            table.insert(field_list, id)
+        end
+    end
     return "fields=" .. table.concat(field_list, ",")
+end
+
+--- Resolve and cache the current user's accountId (for value-based involvement).
+---@param callback fun(account_id: string|nil)
+function M.ensure_account_id(callback)
+    if M.my_account_id ~= nil then
+        callback(M.my_account_id ~= "" and M.my_account_id or nil)
+        return
+    end
+    M.request("/myself", "GET", nil, function(err, data)
+        M.my_account_id = (not err and type(data) == "table" and data.accountId) or ""
+        callback(M.my_account_id ~= "" and M.my_account_id or nil)
+    end)
 end
 
 --- Fetch all field definitions from Jira (for auto-discovering custom field IDs)
@@ -182,6 +207,36 @@ function M.ensure_custom_fields_resolved(callback)
             for _, id in ipairs(ac_ids) do push(id) end
             custom["Acceptance Criteria"] = merged
         end
+
+        -- Auto-sense user-valued fields and bucket each into the FIRST configured
+        -- involvement section whose match strings appear in the field name. Kept
+        -- out of custom_fields so they never pollute rich-text edit sections.
+        local sections = config.options.board and config.options.board.involvement_sections or {}
+        local section_ids = {}
+        for i = 1, #sections do section_ids[i] = {} end
+        local field_seen = {}
+        for _, field in ipairs(fields) do
+            if field.custom and field.name and not field_seen[field.id] then
+                local schema = field.schema or {}
+                local is_user = schema.type == "user"
+                    or (schema.custom and (schema.custom:find("userpicker") or schema.custom:find("people")))
+                if is_user then
+                    local n = field.name:lower()
+                    for i, sec in ipairs(sections) do
+                        local matched = false
+                        for _, m in ipairs(sec.match or {}) do
+                            if n:find(m:lower(), 1, true) then matched = true; break end
+                        end
+                        if matched then
+                            field_seen[field.id] = true
+                            table.insert(section_ids[i], field.id)
+                            break -- first matching section wins
+                        end
+                    end
+                end
+            end
+        end
+        M.involvement_section_ids = section_ids
 
         callback()
     end)

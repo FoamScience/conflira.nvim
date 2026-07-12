@@ -1,0 +1,1 @@
+{"lines":["an info panel"],"spans":[{"field":"text","path":[1,1],"line":0,"editable":true,"col_end":13,"col_start":0}],"marks":[{"kind":"sign","line":0,"col":0,"text":" ","hl":"panel.info"},{"kind":"inline_text","chunks":[["▎ ","panel.info"]],"line":0,"col":0,"pos":"inline"}]}

@@ -107,6 +107,16 @@ require("jira-interface").setup({
         --   "leaves" also hide done leaf items and fully-done subtrees anywhere
         done_filter = "leaves",
 
+        -- Bottom "involvement" sections: issues where a user-valued custom field
+        -- is you but you're not the assignee. Each has a `name` and `match`
+        -- substrings tested (case-insensitive) against custom-field names; fields
+        -- are auto-sensed and join the FIRST section they match (mutually
+        -- exclusive — order matters). Set to {} to disable.
+        involvement_sections = {
+            { name = "Reviewing", match = { "review" } },
+            { name = "Additional Assignees", match = { "additional", "assignee" } },
+        },
+
         -- Type glyphs in the outline.
         type_icons = {
             Epic = "◆", Feature = "◆", Bug = "●",
@@ -288,6 +298,13 @@ Draft-first editing: `:w` saves locally, `<leader>ss` submits to API.
 - **Query switching** — `gq` opens a picker with presets (my work, assigned, created, epics, epic-kind labels, team workload, overdue, saved filters, custom JQL)
 - **Actions** — `e` edit, `t` transition, `a` assign, `c` comment, `gx` open in browser
 - **Navigation** — `]i`/`[i` jump between issues, `/` search works natively
+
+Issues where you're involved but not the assignee appear in dedicated sections at the bottom, auto-sensed from user-valued fields by name (Reviewer, Additional Assignees — incl. the Atlassian `people` type) with **no config**:
+
+- **Reviewing** — you're in a *Reviewer* field
+- **Additional Assignees** — you're in an *additional assignee* field
+
+Both exclude anything already assigned to you, and are mutually exclusive (an issue you both review and co-assign shows once, under Reviewing) — deduped client-side. The status bar's progress % counts only your assigned work, not these sections. The sections are fully configurable via `board.involvement_sections` (rename, change match strings, add or remove sections).
 
 Context parents (shown because their child involves you) render dimmed. Done items are hidden per `board.done_filter` (default `"leaves"` — hides done leaf tasks and fully-done subtrees; set `"trees"` or `"none"` to loosen). The status bar counts the full fetched workable set regardless — leaf nodes by default, or the type set named in `board.workable_jql` — so the progress % stays accurate even when done items are hidden.
 
