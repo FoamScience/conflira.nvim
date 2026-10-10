@@ -28,7 +28,7 @@ type sign struct {
 
 var urgencySigns = map[string]sign{
 	"overdue":  {"●", "error"},
-	"blocked":  {"●", "error"},
+	"blocked":  {"●", "unnecessary"},
 	"due_soon": {"●", "warn"},
 	"done":     {"●", "ok"},
 	"stale":    {"○", "comment"},
@@ -223,12 +223,6 @@ func BuildWithKeys(st *State) (*ir.ProjectionIR, map[int]string) {
 			c.renderNode(node, 0, isLastRoot, nil, titleCol)
 		}
 	}
-
-	// Help bar.
-	c.addLine("")
-	help := " [e]dit [t]ransition [a]ssign [c]omment [/]search [g]roup [r]efresh [?]help"
-	l = c.addLine(help)
-	c.highlight(l, 0, len(help), "statusline")
 
 	return &ir.ProjectionIR{Lines: c.lines, Marks: c.marks, Spans: []ir.Span{}}, c.lineKeys
 }

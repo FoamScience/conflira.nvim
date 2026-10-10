@@ -22,8 +22,6 @@ local EXPECTED_LINES = {
 	"│",
 	"└── T-1 Task one",
 	"",
-	"",
-	"[e]dit [t]ransition [a]ssign [c]omment [/]search [g]roup [r]efresh [?]help",
 }
 
 local EXPECTED_DECOS = {
@@ -47,7 +45,6 @@ local EXPECTED_DECOS = {
 	"5:26 highlight[text]",
 	"6:0 highlight[muted]",
 	"6:22 inline_text",
-	"8:0 highlight[statusline]",
 }
 
 ---@return string[] lines, string[] decos

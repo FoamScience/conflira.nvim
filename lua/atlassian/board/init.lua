@@ -279,6 +279,7 @@ function M.show(issues, project, jql, force_group, custom_jql)
 	vim.wo[win].wrap = false
 	vim.wo[win].signcolumn = "yes:1"
 	vim.wo[win].cursorline = true
+	vim.wo[win].winbar = " [e]dit [t]ransition [a]ssign [c]omment [/]search [g]roup [r]efresh [?]help"
 
 	local config = require("jira-interface.config")
 	local done_filter = config.options.board and config.options.board.done_filter or "leaves"

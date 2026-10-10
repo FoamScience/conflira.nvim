@@ -79,6 +79,7 @@ M.to_token_map = {
 	DiagnosticOk = "ok",
 	DiagnosticInfo = "info",
 	DiagnosticHint = "hint",
+	DiagnosticUnnecessary = "unnecessary",
 }
 
 -- Semantic token → canonical Neovim highlight group (the inverse used by apply).
@@ -141,6 +142,7 @@ M.to_nvim_map = {
 	ok = "DiagnosticOk",
 	info = "DiagnosticInfo",
 	hint = "DiagnosticHint",
+	unnecessary = "DiagnosticUnnecessary",
 }
 
 --- Neovim highlight group → semantic token (pass through if unmapped).

@@ -282,11 +282,6 @@ function M.render(board_state)
 		end
 	end
 
-	-- Help bar
-	add_line("")
-	l = add_line(" [e]dit [t]ransition [a]ssign [c]omment [/]search [g]roup [r]efresh [?]help")
-	add_mark(l, 0, { end_col = #lines[#lines], hl_group = "StatusLine" })
-
 	return ir.neutralize({
 		lines = lines,
 		marks = marks,
