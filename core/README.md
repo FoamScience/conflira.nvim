@@ -50,6 +50,7 @@ core/
   rpc/             JSON-RPC 2.0 server + method handlers (the editor-facing surface)
   cmd/conflira-core/ stdio JSON-RPC server (render, board.fetch, jql, fields, adf)
   cmd/render/      CLI: ADF (or -board) on stdin → IR JSON  (the headless producer)
+  cmd/conflira-dash/ terminal Jira board (herdr pane, see ../herdr-plugin.toml)
   cmd/parity/      CLI: validate an IR JSON document, print a structural summary
   testdata/        wire JSON captured from the Lua producer (parity oracle)
     cases/         editor ADF→IR fixtures      (+ gen.lua)

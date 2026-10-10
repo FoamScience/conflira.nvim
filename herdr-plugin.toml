@@ -1,0 +1,26 @@
+# conflira for herdr: a Jira board pane driven by the Go core (core/cmd/conflira-dash).
+# Auth: JIRA_URL, JIRA_EMAIL, JIRA_API_TOKEN (JIRA_PROJECT optional) from the herdr
+# server env, or `export` lines in <plugin config dir>/env (`herdr plugin config-dir conflira`).
+
+id = "conflira"
+name = "conflira"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Jira board for herdr: browse, transition, assign, comment; Enter opens in the herdr-nvim sidebar."
+platforms = ["linux", "macos"]
+
+# Runs on `herdr plugin install` only; after `herdr plugin link`, build once by hand.
+[[build]]
+command = ["go", "build", "-C", "core", "-o", "../bin/conflira-dash", "./cmd/conflira-dash"]
+
+[[panes]]
+id = "board"
+title = "Jira"
+placement = "tab"
+command = ["sh", "-c", "env=\"${HERDR_PLUGIN_CONFIG_DIR:-$HOME/.config/herdr/plugins/config/conflira}/env\"; [ -f \"$env\" ] && . \"$env\"; exec ./bin/conflira-dash"]
+
+[[actions]]
+id = "open"
+title = "Jira: open board"
+contexts = ["workspace", "tab", "pane"]
+command = ["sh", "-c", "exec \"${HERDR_BIN_PATH:-herdr}\" plugin pane open --plugin conflira --entrypoint board --placement tab --focus"]

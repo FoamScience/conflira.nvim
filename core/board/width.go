@@ -17,6 +17,9 @@ func dw(s string) int {
 	return w
 }
 
+// DisplayWidth exposes dw to clients that lay out board IR themselves.
+func DisplayWidth(s string) int { return dw(s) }
+
 func isWide(r rune) bool {
 	switch {
 	case r >= 0x1100 && r <= 0x115F,
